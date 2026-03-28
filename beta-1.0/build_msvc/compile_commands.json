@@ -1,0 +1,38 @@
+[
+{
+  "directory": "E:/Code/eric/V2/beta-1.0/build_msvc",
+  "command": "C:\\PROGRA~2\\MICROS~2\\2022\\BUILDT~1\\VC\\Tools\\MSVC\\1444~1.352\\bin\\Hostx64\\x64\\cl.exe  /nologo /TP -IE:\\Code\\eric\\V2\\beta-1.0\\src -external:IC:\\vcpkg\\installed\\x64-windows-static\\include -external:W0 /DWIN32 /D_WINDOWS /EHsc /O2 /Ob2 /DNDEBUG -std:c++17 -MT /FoCMakeFiles\\beta.dir\\src\\game\\main.cpp.obj /FdCMakeFiles\\beta.dir\\ /FS -c E:\\Code\\eric\\V2\\beta-1.0\\src\\game\\main.cpp",
+  "file": "E:/Code/eric/V2/beta-1.0/src/game/main.cpp",
+  "output": "E:/Code/eric/V2/beta-1.0/build_msvc/CMakeFiles/beta.dir/src/game/main.cpp.obj"
+},
+{
+  "directory": "E:/Code/eric/V2/beta-1.0/build_msvc",
+  "command": "C:\\PROGRA~2\\MICROS~2\\2022\\BUILDT~1\\VC\\Tools\\MSVC\\1444~1.352\\bin\\Hostx64\\x64\\cl.exe  /nologo /TP -IE:\\Code\\eric\\V2\\beta-1.0\\src -external:IC:\\vcpkg\\installed\\x64-windows-static\\include -external:W0 /DWIN32 /D_WINDOWS /EHsc /O2 /Ob2 /DNDEBUG -std:c++17 -MT /FoCMakeFiles\\beta.dir\\src\\game\\world\\spring_river_system.cpp.obj /FdCMakeFiles\\beta.dir\\ /FS -c E:\\Code\\eric\\V2\\beta-1.0\\src\\game\\world\\spring_river_system.cpp",
+  "file": "E:/Code/eric/V2/beta-1.0/src/game/world/spring_river_system.cpp",
+  "output": "E:/Code/eric/V2/beta-1.0/build_msvc/CMakeFiles/beta.dir/src/game/world/spring_river_system.cpp.obj"
+},
+{
+  "directory": "E:/Code/eric/V2/beta-1.0/build_msvc",
+  "command": "C:\\PROGRA~2\\MICROS~2\\2022\\BUILDT~1\\VC\\Tools\\MSVC\\1444~1.352\\bin\\Hostx64\\x64\\cl.exe  /nologo /TP -IE:\\Code\\eric\\V2\\beta-1.0\\src -external:IC:\\vcpkg\\installed\\x64-windows-static\\include -external:W0 /DWIN32 /D_WINDOWS /EHsc /O2 /Ob2 /DNDEBUG -std:c++17 -MT /FoCMakeFiles\\test_engine.dir\\src\\test_engine.cpp.obj /FdCMakeFiles\\test_engine.dir\\ /FS -c E:\\Code\\eric\\V2\\beta-1.0\\src\\test_engine.cpp",
+  "file": "E:/Code/eric/V2/beta-1.0/src/test_engine.cpp",
+  "output": "E:/Code/eric/V2/beta-1.0/build_msvc/CMakeFiles/test_engine.dir/src/test_engine.cpp.obj"
+},
+{
+  "directory": "E:/Code/eric/V2/beta-1.0/build_msvc",
+  "command": "C:\\PROGRA~2\\MICROS~2\\2022\\BUILDT~1\\VC\\Tools\\MSVC\\1444~1.352\\bin\\Hostx64\\x64\\cl.exe  /nologo /TP -IE:\\Code\\eric\\V2\\beta-1.0\\src -external:IC:\\vcpkg\\installed\\x64-windows-static\\include -external:W0 /DWIN32 /D_WINDOWS /EHsc /O2 /Ob2 /DNDEBUG -std:c++17 -MT /FoCMakeFiles\\mapCreator.dir\\src\\mapCreator\\creator.cpp.obj /FdCMakeFiles\\mapCreator.dir\\ /FS -c E:\\Code\\eric\\V2\\beta-1.0\\src\\mapCreator\\creator.cpp",
+  "file": "E:/Code/eric/V2/beta-1.0/src/mapCreator/creator.cpp",
+  "output": "E:/Code/eric/V2/beta-1.0/build_msvc/CMakeFiles/mapCreator.dir/src/mapCreator/creator.cpp.obj"
+},
+{
+  "directory": "E:/Code/eric/V2/beta-1.0/build_msvc",
+  "command": "C:\\PROGRA~2\\MICROS~2\\2022\\BUILDT~1\\VC\\Tools\\MSVC\\1444~1.352\\bin\\Hostx64\\x64\\cl.exe  /nologo /TP -IE:\\Code\\eric\\V2\\beta-1.0\\src -external:IC:\\vcpkg\\installed\\x64-windows-static\\include -external:W0 /DWIN32 /D_WINDOWS /EHsc /O2 /Ob2 /DNDEBUG -std:c++17 -MT /FoCMakeFiles\\mapCreatorV2.dir\\src\\mapCreatorV2\\creator2.cpp.obj /FdCMakeFiles\\mapCreatorV2.dir\\ /FS -c E:\\Code\\eric\\V2\\beta-1.0\\src\\mapCreatorV2\\creator2.cpp",
+  "file": "E:/Code/eric/V2/beta-1.0/src/mapCreatorV2/creator2.cpp",
+  "output": "E:/Code/eric/V2/beta-1.0/build_msvc/CMakeFiles/mapCreatorV2.dir/src/mapCreatorV2/creator2.cpp.obj"
+},
+{
+  "directory": "E:/Code/eric/V2/beta-1.0/build_msvc",
+  "command": "C:\\PROGRA~2\\MICROS~2\\2022\\BUILDT~1\\VC\\Tools\\MSVC\\1444~1.352\\bin\\Hostx64\\x64\\cl.exe  /nologo /TP -IE:\\Code\\eric\\V2\\beta-1.0\\src -external:IC:\\vcpkg\\installed\\x64-windows-static\\include -external:W0 /DWIN32 /D_WINDOWS /EHsc /O2 /Ob2 /DNDEBUG -std:c++17 -MT /FoCMakeFiles\\3DSprite.dir\\src\\3DSprite\\3DSprite.cpp.obj /FdCMakeFiles\\3DSprite.dir\\ /FS -c E:\\Code\\eric\\V2\\beta-1.0\\src\\3DSprite\\3DSprite.cpp",
+  "file": "E:/Code/eric/V2/beta-1.0/src/3DSprite/3DSprite.cpp",
+  "output": "E:/Code/eric/V2/beta-1.0/build_msvc/CMakeFiles/3DSprite.dir/src/3DSprite/3DSprite.cpp.obj"
+}
+]

@@ -1,0 +1,6 @@
+{
+    "name": "mossyStone",
+    "formatType": "cube",
+    "collisionType": "solid",
+    "color": [100, 130, 100, 255]
+}

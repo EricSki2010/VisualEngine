@@ -1,0 +1,6 @@
+{
+    "name": "waterBlock",
+    "formatType": "cube",
+    "collisionType": "water",
+    "color": [40, 100, 180, 200]
+}

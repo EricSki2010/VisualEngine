@@ -1,0 +1,6 @@
+{
+    "name": "stoneBlock",
+    "formatType": "cube",
+    "collisionType": "solid",
+    "color": [130, 130, 130, 255]
+}

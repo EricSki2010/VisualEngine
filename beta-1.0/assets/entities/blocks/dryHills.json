@@ -1,0 +1,6 @@
+{
+    "name": "dryHills",
+    "formatType": "cube",
+    "collisionType": "solid",
+    "color": [150, 130, 90, 255]
+}

@@ -1,0 +1,6 @@
+{
+    "name": "denseForest",
+    "formatType": "cube",
+    "collisionType": "solid",
+    "color": [15, 80, 15, 255]
+}

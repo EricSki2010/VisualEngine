@@ -1,0 +1,6 @@
+{
+    "name": "deepWater",
+    "formatType": "cube",
+    "collisionType": "water",
+    "color": [20, 60, 140, 255]
+}

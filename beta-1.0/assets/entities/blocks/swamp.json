@@ -1,0 +1,6 @@
+{
+    "name": "swamp",
+    "formatType": "cube",
+    "collisionType": "solid",
+    "color": [60, 100, 60, 255]
+}

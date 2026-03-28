@@ -1,0 +1,6 @@
+{
+    "name": "riverBank",
+    "formatType": "cube",
+    "collisionType": "solid",
+    "color": [194, 178, 128, 255]
+}

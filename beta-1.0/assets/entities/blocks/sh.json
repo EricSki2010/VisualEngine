@@ -1,0 +1,7 @@
+{
+    "name": "sh",
+    "formatType": "glb",
+    "modelFile": "assets/entities/blockModels/sh.glb",
+    "collisionType": "solid",
+    "color": [130, 130, 130, 255]
+}

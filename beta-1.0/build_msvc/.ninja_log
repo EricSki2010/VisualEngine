@@ -1,0 +1,19 @@
+# ninja log v6
+26	576	7952428883145247	CMakeFiles/beta.dir/src/main.cpp.obj	16851e2ceb4bb538
+31	820	7952062998031645	CMakeFiles/beta.dir/src/world/spring_river_system.cpp.obj	e3da0b397a096da9
+2630	3912	7960984492279002	beta.exe	2ac69e8481aedb28
+33	963	7955808087343195	CMakeFiles/beta.dir/src/game/world/spring_river_system.cpp.obj	9902e6e5b8bfff54
+2352	3775	7960984489549016	test_engine.exe	46a20ddaca0fce85
+2041	3167	7961129045817065	mapCreatorV2.exe	bc452d0c91b97c63
+22	1648	7952419429076728	CMakeFiles/beta.dir/src/logic/obj_loader.cpp.obj	b22ad3251f35e5c7
+46	2973	7960984466439052	CMakeFiles/mapCreator.dir/src/mapCreator/creator.cpp.obj	278d3b092430691d
+35	2629	7960984466329054	CMakeFiles/beta.dir/src/game/main.cpp.obj	bc7bbdc4bc2a78ec
+41	2346	7960984466385124	CMakeFiles/test_engine.dir/src/test_engine.cpp.obj	ce67328d10ea073c
+1330	3772	7960984479601538	3DSprite.exe	6285c23671171387
+27	1190	7956741731404124	CMakeFiles/mapCreator.dir/src/mapCreator/creater.cpp.obj	e50d416dee13e15c
+2974	4166	7960984495730639	mapCreator.exe	14c29ecc8bdfa998
+35	855	7957675012461403	CMakeFiles/mapCreatorV2.dir/src/mapCreatorV2/creator.cpp.obj	430d2a75473df8ac
+31	2040	7961129025721822	CMakeFiles/mapCreatorV2.dir/src/mapCreatorV2/creator2.cpp.obj	3ed206e9971c3700
+57	1303	7960984466545065	CMakeFiles/3DSprite.dir/src/3DSprite/3DSprite.cpp.obj	246b49de13652f92
+30	2112	7964424978799396	CMakeFiles/mapCreatorV2.dir/src/mapCreatorV2/creator2.cpp.obj	3ed206e9971c3700
+2112	3483	7964424999624706	mapCreatorV2.exe	bc452d0c91b97c63

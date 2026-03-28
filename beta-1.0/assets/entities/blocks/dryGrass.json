@@ -1,0 +1,6 @@
+{
+    "name": "dryGrass",
+    "formatType": "cube",
+    "collisionType": "solid",
+    "color": [160, 180, 80, 255]
+}

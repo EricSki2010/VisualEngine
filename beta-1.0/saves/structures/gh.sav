@@ -1,0 +1,25 @@
+name=gh
+type=3D Structure
+origin=0,0,0
+camera=0.739998,-5.66561,6.60593,167.7,40.4,30
+chunk=-1,0,0,0
+cb=15,1,0,g
+endchunk
+chunk=0,0,0,1
+cb=0,0,0,8
+cb=0,1,0,8
+cb=0,2,0,g
+cb=1,1,0,gh
+cb=1,2,0,gh
+cb=2,2,0,gh
+cb=3,2,0,hh
+cb=3,2,1,deepWater
+cb=4,2,0,hh
+cb=4,2,1,deepWater
+cb=5,2,0,hh
+cb=5,2,1,deepWater
+cb=6,1,1,deepWater
+cb=6,2,0,jj
+cb=6,2,1,deepWater
+cb=7,2,0,jj
+endchunk

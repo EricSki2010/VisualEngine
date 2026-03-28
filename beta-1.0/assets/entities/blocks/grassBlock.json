@@ -1,0 +1,6 @@
+{
+    "name": "grassBlock",
+    "formatType": "cube",
+    "collisionType": "solid",
+    "color": [60, 160, 50, 255]
+}

@@ -1,0 +1,6 @@
+{
+    "name": "mountainPeak",
+    "formatType": "cube",
+    "collisionType": "solid",
+    "color": [170, 170, 170, 255]
+}

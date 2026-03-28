@@ -1,0 +1,7 @@
+{
+	"InstallScripts" : 
+	[
+		"E:/Code/eric/V2/beta-1.0/build_msvc/cmake_install.cmake"
+	],
+	"Parallel" : false
+}

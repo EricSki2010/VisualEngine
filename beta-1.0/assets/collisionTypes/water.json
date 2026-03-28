@@ -1,0 +1,9 @@
+{
+    "name": "water",
+    "speedScale": 0.5,
+    "gravityScale": 0.5,
+    "canSwim": true,
+    "swimUpSpeed": 1.0,
+    "exitJumpForce": 3.5,
+    "entryVelocityScale": 0.3
+}

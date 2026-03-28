@@ -1,0 +1,6 @@
+{
+    "name": "sand",
+    "formatType": "cube",
+    "collisionType": "solid",
+    "color": [210, 190, 130, 255]
+}

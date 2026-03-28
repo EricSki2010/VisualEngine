@@ -1,0 +1,7 @@
+{
+    "name": "TestBlock",
+    "formatType": "glb",
+    "modelFile": "assets/entities/blockModels/TestBlock.glb",
+    "collisionType": "solid",
+    "color": [130, 130, 130, 255]
+}

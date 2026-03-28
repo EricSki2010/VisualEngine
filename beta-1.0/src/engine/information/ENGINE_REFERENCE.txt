@@ -1,0 +1,706 @@
+========================================================================
+  ENGINE REFERENCE
+  All commands / functions available in the engine
+========================================================================
+
+
+--- ENGINE (engine.h) -------------------------------------------------
+The main struct that ties everything together.
+
+  Engine engine;
+      Creates an engine instance. Holds the world, camera, player,
+      registries, inventory, hotbar, and save/load.
+
+  engine.init(title, fullscreen)
+      Opens a window at the monitor's native resolution.
+      title         - window title string
+      fullscreen    - optional, default: true (fullscreen at max resolution)
+                      pass false to get a windowed mode at native resolution
+
+  engine.setView(mode)
+      Changes the camera angle. Options:
+        VIEW_2_5D    - isometric angle (default)
+        VIEW_TOPDOWN - straight down from above
+        VIEW_3D      - behind the player
+
+  engine.setSpawn(x, y, z)
+      Sets where the player starts. Call before run().
+      y should be above the ground (player will fall with gravity).
+
+  engine.loadBlocks(folderPath, modelFolder)
+      Loads all .json block definitions from a folder.
+      Also auto-detects .glb models from modelFolder.
+      Call after init(), before placing blocks.
+      modelFolder defaults to "assets/blockModels".
+      Example: engine.loadBlocks("assets/blocks")
+
+  engine.loadItems(folderPath, modelFolder)
+      Loads all .json item definitions from a folder.
+      Also auto-detects .glb models from modelFolder.
+      Call after init().
+      modelFolder defaults to "assets/itemModels".
+      Example: engine.loadItems("assets/items")
+
+  engine.placeBlock(name, x, z, height)
+      Places a block by registry name (loaded from JSON).
+      Looks up color, collision type, etc. from the definition.
+      Thread-safe — can be called from buildAsync.
+      Prints a warning if the name isn't found (doesn't crash).
+      Example: engine.placeBlock("grassBlock", 0, 0)
+               engine.placeBlock("stoneBlock", 3, 0, 1.0f)
+
+  engine.placeBlock(r, g, b, x, z, height)
+      Places a block by raw RGB color. No JSON needed.
+      Example: engine.placeBlock(180, 80, 80, -5, 0, 1.0f)
+
+  engine.placeBlock(r, g, b, a, x, z, height)
+      Same but with alpha channel.
+
+  engine.removeBlock(x, z)
+      Removes the block at (x, z).
+
+  engine.viewRadius
+      How far (in tiles) around the player to render. Default: 56.
+
+  engine.showDebug
+      Set to true to show collision boxes. Toggle with F1 at runtime.
+
+  engine.seed
+      Integer seed stored by the engine. Saved/loaded automatically.
+      The engine doesn't use it — it's for your game's world generation.
+
+  engine.onUpdate = [](float dt) { ... };
+      Optional callback. Runs every frame before drawing.
+      dt is the time since last frame in seconds.
+
+  engine.onDraw = []() { ... };
+      Optional callback. Runs every frame inside BeginMode3D.
+      Use this for extra 3D drawing (models, particles, etc.).
+
+  engine.onDrawUI = []() { ... };
+      Optional callback. Runs every frame AFTER EndMode3D.
+      Use this for 2D overlays (inventory, hotbar, HUD, text).
+      Always renders on top of everything including the player.
+
+  engine.buildAsync(fn)
+      Runs fn on a background thread. Use for world generation so the
+      game loop can start immediately — tiles appear as they're placed.
+      World read/write is thread-safe (shared_mutex), so placeBlock
+      works from any thread without extra locking.
+      Example:
+          engine.buildAsync([&]() {
+              for (int x = -500; x <= 500; x++)
+                  for (int z = -500; z <= 500; z++)
+                      engine.placeBlock("grassBlock", x, z);
+          });
+          engine.run();  // starts right away, world loads in background
+
+  engine.isBuilding()
+      Returns true while a buildAsync task is still running.
+      Useful for showing a loading indicator in onDrawUI.
+
+  engine.waitForBuild()
+      Blocks until the background build finishes. Call this if you
+      need the world to be fully generated before continuing.
+
+  engine.save(path)
+      Saves all engine state to a binary file: world tiles, player
+      position, inventory, hotbar, and seed.
+      Returns true on success.
+      Example: engine.save("saves/world.sav")
+
+  engine.load(path)
+      Loads engine state from a save file. Replaces all current state.
+      Returns true on success, false if file not found or invalid.
+      Example: engine.load("saves/world.sav")
+
+  engine.run()
+      Starts the game loop. Handles input, physics, rendering.
+      Blocks until the window is closed. Joins the build thread
+      on exit if still running.
+
+
+--- ENTITY (entity.h) -------------------------------------------------
+Base entity with position, physics, and collision.
+The engine has one built-in: engine.player
+
+  Properties:
+    position        - Vector3, feet position (x, y, z)
+    width           - collision width  (default: 0.3)
+    depth           - collision depth  (default: 0.3)
+    height          - entity height    (default: 1.8)
+    speed           - movement speed   (default: 6.0)
+    maxStepHeight   - max height the entity can step up (default: 0.26)
+    jumpForce       - upward force when jumping (default: 4.9)
+    collisionRadius - how many tiles around to check (default: 2)
+    facingAngle     - Y rotation in degrees (auto-set by move)
+    gravity         - GravityBody (see gravity.h)
+    halfW()         - returns width / 2.0f (convenience helper)
+    halfD()         - returns depth / 2.0f (convenience helper)
+    collisionBoxes  - std::vector<CollisionBox>, owned per-entity.
+                      Populated by registerTiles(), used by move(),
+                      applyGravity(), and collision type checks.
+                      Each entity has its own independent set of boxes.
+
+  entity.loadModel(path, modelHeight)
+      Loads a .glb/.gltf model for the entity.
+      modelHeight - optional, auto-scales the model to this height.
+                    If 0, uses the model's original size.
+      Example: entity.loadModel("assets/player.glb", 1.8f)
+
+  entity.unloadModel()
+      Frees the loaded model from memory.
+
+  entity.draw(fallbackColor)
+      Draws the entity. Uses the model if loaded, otherwise a colored cube.
+      fallbackColor - cube color when no model (default: RED)
+
+  entity.move(inputX, inputZ, dt, speedScale)
+      Moves the entity with collision. Normalizes input automatically.
+      speedScale - optional multiplier (e.g. 0.5 for water slow)
+
+  entity.applyGravity(dt, gravityScale)
+      Applies gravity, lands on ground, unsticks from blocks.
+      Returns true if entity is on ground.
+      gravityScale - optional multiplier (e.g. 0.5 for water)
+
+  entity.isBaseInCollisionType(type)
+      Returns true if the entity's FEET overlap a box of the given type.
+      Types: CL_TILE_SOLID, CL_TILE_WATER, CL_TILE_RIVER
+      Example: entity.isBaseInCollisionType(CL_TILE_WATER)
+
+  entity.isInCollisionType(type)
+      Returns true if ANY PART of the entity's body overlaps a box of the given type.
+      Checks from feet (position.y) to head (position.y + height).
+      Example: entity.isInCollisionType(CL_TILE_WATER)
+
+  entity.registerTiles(getTileInfo)
+      Populates entity.collisionBoxes with nearby tiles. Takes a callback:
+        getTileInfo(tileX, tileZ) -> CLTileInfo { groundHeight, type, waterSurface }
+      Each entity maintains its own collision boxes, so calling this on
+      one entity does not affect another entity's collision data.
+
+  entity.jump(blocks)
+      Makes the entity jump if it's on the ground.
+      blocks - optional, how many blocks high to jump.
+      Example: entity.jump()     -- uses default jumpForce
+               entity.jump(1)    -- jump exactly 1 block high
+               entity.jump(2)    -- jump exactly 2 blocks high
+               entity.jump(0.5)  -- half a block
+
+  entity.drawCollisionDebug()
+      Draws yellow wireframe around entity + red wireframes for
+      the entity's own collision boxes. Useful for debugging.
+
+
+--- CAMERA (camera.h) -------------------------------------------------
+Wraps raylib's Camera3D with view presets.
+
+  GameCamera camera;
+      Creates a camera.
+
+  camera.init(startMode)
+      Sets up the camera. startMode is optional (default: VIEW_2_5D).
+
+  camera.setView(mode)
+      Changes view mode. Updates the camera offset:
+        VIEW_2_5D    -> offset (-15, 25, -15)
+        VIEW_TOPDOWN -> offset (0, 35, -0.1)
+        VIEW_3D      -> offset (0, 10, -15)
+
+  camera.follow(target)
+      Moves the camera to follow a position (usually player.position).
+
+  camera.cam
+      The raw Camera3D — pass to BeginMode3D() if drawing manually.
+
+  camera.offset
+      The position offset from target. You can change this directly.
+
+
+--- INPUT (input.h) ---------------------------------------------------
+WASD movement mapped to world directions based on camera mode.
+
+  InputDir dir = getMovementInput(mode);
+      Returns dir.x and dir.z based on WASD keys.
+      Mapping changes per ViewMode:
+        VIEW_2_5D:    W=(+x,+z) S=(-x,-z) A=(+x,-z) D=(-x,+z)
+        VIEW_TOPDOWN: W=-z S=+z A=-x D=+x
+        VIEW_3D:      W=+z S=-z A=-x D=+x
+
+  jumpPressed()
+      Returns true the frame SPACE is pressed.
+
+  jumpHeld()
+      Returns true every frame SPACE is held down.
+
+
+--- WORLD (world.h) ---------------------------------------------------
+Chunk-based tile storage. Tiles are grouped into 16x16 chunks so that
+iteration only visits nearby chunks instead of the entire world.
+The per-tile API is unchanged — chunks are an internal detail.
+All methods are thread-safe (shared_mutex) for use with buildAsync.
+
+  World world;
+      Creates an empty world.
+
+  world.placeTile(x, z, type, height, r, g, b, a)
+      Adds or overwrites a tile at (x, z). Thread-safe.
+
+  world.removeTile(x, z)
+      Removes the tile at (x, z). Does nothing if empty.
+      Automatically removes empty chunks. Thread-safe.
+
+  world.hasTile(x, z)
+      Returns true if a tile exists at (x, z). Thread-safe.
+
+  world.getTile(x, z)
+      Returns a std::optional<WorldTile>. Empty if no tile exists.
+      Check with .has_value() or use in an if (auto tile = ...).
+      WorldTile has: type, height, r, g, b, a, blockName
+      Thread-safe (returns a copy, safe to use after the call).
+
+  world.forEachTileInRadius(centerX, centerZ, radius, visitor)
+      Iterates only tiles within radius of (centerX, centerZ).
+      Only visits chunks that overlap the area — cost scales with
+      view area, not world size. Thread-safe. Visitor signature:
+        void(int worldX, int worldZ, const WorldTile& tile)
+
+  world.clear()
+      Removes all tiles and chunks. Thread-safe.
+
+  tileKey(x, z)
+      Packs two ints into a single int64_t key.
+
+  unpackTileKey(key, x, z)
+      Unpacks an int64_t key back into (x, z) ints.
+
+
+--- WORLD ACTIONS (world_actions.h) -----------------------------------
+Wraps World with mob spawn/remove hooks for game logic.
+
+  WorldActions actions;
+  actions.world = &someWorld;
+
+  actions.placeTile(x, z, type, height, r, g, b, a)
+      Same as world.placeTile but returns false if world is null.
+
+  actions.removeTile(x, z)
+      Same as world.removeTile but returns false if world is null.
+
+  actions.spawnMob = [](float x, float y, float z, int type) -> int { ... };
+      Set this callback to handle mob spawning. Returns mob ID.
+
+  actions.removeMob = [](int mobId) -> bool { ... };
+      Set this callback to handle mob removal. Returns success.
+
+  actions.canSpawnMob() / actions.canRemoveMob()
+      Returns true if the callback has been set.
+
+
+--- GRAVITY (gravity.h) -----------------------------------------------
+Simple gravity physics for any entity.
+
+  GravityBody gravity;
+
+  gravity.update(dt, gravityScale)
+      Applies gravity to velocity. Returns Y displacement for this frame.
+      gravityScale - 1.0 normal, 0.5 for water (optional)
+
+  gravity.land()
+      Call when the entity touches ground. Stops falling.
+
+  gravity.launch(force)
+      Call to jump. Sets upward velocity.
+
+  gravity.velocityY   - current vertical speed
+  gravity.grounded    - true if on ground
+
+  Constants:
+      GRAVITY           = -20.0   (units/sec^2)
+      TERMINAL_VELOCITY = -40.0
+
+
+--- COLLISION (collision.h) -------------------------------------------
+Axis-aligned collision boxes and sweep tests.
+Each entity owns its own std::vector<CollisionBox> — there is no global
+shared state. All collision functions take a vector reference so multiple
+entities can have independent collision data at the same time.
+
+  checkEntityXZOverlap(entityX, entityZ, halfW, halfD, box)
+      Returns true if the entity's XZ footprint overlaps the given
+      CollisionBox. Used internally by Entity collision methods.
+
+  sweepMovement(boxes, from, to, moverSize, moverMinY, moverMaxY)
+      Returns 0.0-1.0 for how far along from->to is safe to move.
+      1.0 = no collision. Expands boxes by mover size.
+      boxes - the entity's collision box vector
+
+  checkMovementCollision(boxes, from, to, moverMinY, moverMaxY)
+      Returns true if the line from->to hits any solid box.
+      boxes - the entity's collision box vector
+
+  registerNearbyTiles(outBoxes, posX, posZ, radius, getTileInfo)
+      Clears outBoxes and fills it with collision boxes for tiles
+      around the given position. Each entity passes its own vector.
+      getTileInfo callback provides ground height and tile type.
+
+  Constants:
+      CL_PI              = 3.14159265358979
+      GROUND_NONE        = -9999.0   (sentinel: no ground found)
+      COLLISION_SKIN     = 0.01      (gap to prevent edge-sitting)
+      GROUNDED_EPSILON   = 0.01      (tolerance for ground check)
+
+  Helpers:
+      lineSegmentsIntersect(a1, a2, b1, b2)
+      lineIntersectsRect(p1, p2, rect)
+      pointInRect(point, rect)
+      rectsOverlap(a, b)
+
+
+--- TILE RNG (tile_rng.h) ---------------------------------------------
+Deterministic per-tile random numbers. Same input = same output.
+
+  tileHash(x, z, channel)
+      Returns a uint32 hash. Channel separates different random streams.
+
+  tileRandFloat(x, z, channel)
+      Returns a float in [0.0, 1.0).
+
+  tileRandInt(x, z, max, channel)
+      Returns an int in [0, max). Returns 0 if max <= 0.
+
+  tileRandChance(x, z, probability, channel)
+      Returns true with the given probability [0.0, 1.0].
+
+
+--- BLOCK REGISTRY (registry.h) ---------------------------------------
+Data-driven block definitions loaded from JSON files.
+
+  JSON file format (e.g. assets/blocks/grassBlock.json):
+      {
+          "name": "grassBlock",
+          "formatType": "cube",
+          "modelFile": "assets/blocks/grass.glb",
+          "collisionType": "solid",
+          "color": [60, 160, 50, 255],
+          "lootTable": "assets/loot/grass.json"
+      }
+
+  Fields (all optional except name):
+      name          - block identifier, used in placeBlock("name", ...)
+      formatType    - "cube" (default) or "glb" for 3D model
+      modelFile     - path to .glb model (only if formatType is "glb")
+      collisionType - "solid" (default), "water", or "river"
+      color         - [r, g, b] or [r, g, b, a], default grey
+      lootTable     - path to loot table json (for game logic)
+
+  If "name" is omitted, the filename is used (grassBlock.json -> "grassBlock").
+
+  BlockRegistry registry;
+
+  registry.loadFolder(path)
+      Loads all .json files in a folder.
+
+  registry.get(name)
+      Returns a BlockDef pointer, or nullptr if not found.
+
+  registry.has(name)
+      Returns true if the block name exists.
+
+
+--- ITEM REGISTRY (item_registry.h) -----------------------------------
+Data-driven item definitions loaded from JSON files.
+Items are things that go in the inventory/hotbar (tools, materials, etc.)
+as opposed to blocks which are placed in the world.
+
+  JSON file format (e.g. assets/items/woodSword.json):
+      {
+          "name": "woodSword",
+          "model": "assets/itemModels/woodSword.glb"
+      }
+
+  Fields:
+      name      - item identifier, used in inventory.addItem("name", ...)
+                  If omitted, the filename is used (woodSword.json -> "woodSword")
+      model     - path to .glb model (optional, auto-detected from itemModels/)
+
+  Auto-detection:
+      If an item has no "model" set but assets/itemModels/woodSword.glb
+      exists, it is automatically assigned. Same pattern as blocks.
+
+  ItemRegistry itemRegistry;
+
+  itemRegistry.loadFolder(path)
+      Loads all .json files in a folder.
+
+  itemRegistry.get(name)
+      Returns an ItemDef pointer, or nullptr if not found.
+      ItemDef has: name, modelFile, model, modelLoaded
+
+  itemRegistry.has(name)
+      Returns true if the item name exists.
+
+
+--- INVENTORY (inventory.h) -------------------------------------------
+Item storage with a grid inventory and a quick-select hotbar.
+Both come with a simple default UI (grey boxes, item names, counts).
+You can replace the default drawing with your own by setting onDrawSlot.
+
+  -- Item Slot --
+  ItemSlot has: itemName (string), count (int), empty(), clear()
+
+  ItemSlot::stackItems(src, dst, maxStack)
+      Static helper. Transfers as many items as possible from src into dst
+      (must already be the same itemName). Returns number transferred.
+      Clears src if fully transferred. maxStack defaults to 64.
+
+  stackThenFill(src, slots, maxStack)
+      Free function. Two-pass: first stacks src onto matching slots,
+      then fills empty slots. Returns leftover count (0 = all placed).
+      Used internally by addItem(), shiftClickTransfer(), returnToSlots().
+
+  -- Inventory --
+  Inventory inventory;
+
+  inventory.init(slotCount, keybind)
+      Creates slotCount slots. keybind opens/closes (default: KEY_E).
+      Example: engine.inventory.init(24, KEY_E)
+
+  inventory.update()
+      Call once per frame. Handles open/close key toggle.
+
+  inventory.draw()
+      Draws a centered grid when inventory.open is true.
+      Uses onDrawSlot if set, otherwise the default grey-box UI.
+
+  inventory.open
+      True when the inventory is visible. Toggled by the keybind.
+
+  inventory.columns
+      Number of columns in the grid (default: 8). Change before draw.
+
+  inventory.addItem(name, amount, maxStack)
+      Adds items, stacks onto existing slots first.
+      Returns leftover count that didn't fit (0 = all added).
+      Example: inventory.addItem("stoneBlock", 5)
+
+  inventory.removeItem(name, amount)
+      Removes items. Returns how many were actually removed.
+
+  inventory.countItem(name)
+      Returns total count of an item across all slots.
+
+  inventory.hasSpace(name, maxStack)
+      Returns true if there's room for at least 1 more.
+
+  inventory.getSlot(index)
+      Returns ItemSlot pointer, or nullptr if out of range.
+
+  -- HotBar --
+  HotBar hotbar;
+
+  hotbar.init(slotCount)
+      Creates up to 10 slots (keys 1-9 + 0).
+      Example: engine.hotbar.init(9)
+
+  hotbar.update()
+      Call once per frame. Handles number key selection + mouse wheel.
+
+  hotbar.draw()
+      Draws a row of slots centered at the bottom of the screen.
+      Uses onDrawSlot if set, otherwise the default grey-box UI.
+
+  hotbar.selected
+      Index of the currently selected slot (set by keys/wheel).
+
+  hotbar.getSelected()
+      Returns the currently selected ItemSlot pointer.
+
+  hotbar.setSlot(index, name, count)
+      Directly set a hotbar slot's contents.
+
+  hotbar.getSlot(index)
+      Returns ItemSlot pointer, or nullptr if out of range.
+
+  -- Replacing the Default UI --
+  Both Inventory and HotBar have an onDrawSlot callback:
+
+      engine.hotbar.onDrawSlot = [](const ItemSlot& slot, float x, float y,
+                                     float size, bool selected) {
+          // Your custom drawing here.
+          // x, y    = top-left corner of this slot on screen
+          // size    = width and height of the slot in pixels
+          // selected = true if this is the active hotbar slot
+          // slot    = the item data (slot.itemName, slot.count, slot.empty())
+      };
+
+  Setting onDrawSlot replaces the default for that component only.
+  Set it to nullptr to go back to the default. The inventory and
+  hotbar each have their own onDrawSlot — you can replace one
+  without affecting the other.
+
+
+--- SAVE SYSTEM (save.h + engine.h) -----------------------------------
+Binary save/load for all engine state.
+
+  engine.save(path)
+      Saves to a binary file. Includes:
+        - seed
+        - player position + facing angle
+        - all inventory slots (item names + counts)
+        - all hotbar slots + selected index
+        - all world tiles (position, type, height, color, blockName)
+      Thread-safe — acquires a shared lock on the world during tile
+      serialization, so it can be called while buildAsync is running.
+      Returns true on success.
+      Example: engine.save("saves/world.sav")
+
+  engine.load(path)
+      Loads from a save file. Replaces all current state.
+      Returns true on success, false if file missing or corrupt.
+      Validates data on load: inventory capped at 1000 slots, hotbar
+      at 10, item counts clamped to [0, 64], hotbar selected index
+      bounds-checked, tile count capped at 100M. Truncated files are
+      detected and rejected with an error message.
+      Example: engine.load("saves/world.sav")
+
+  File format: binary, version-tagged (magic "EV2S", version 1).
+  Forward-compatible — rejects files with a newer version number.
+
+
+--- COLLISION EFFECTS (collision_effects.h) ---------------------------
+Data-driven effects applied when an entity enters a non-solid collision
+type (water, river, etc.). Loaded from JSON files in assets/collisionTypes/.
+
+  engine.loadCollisionEffects(folder)
+      Loads all .json files from the folder. Default: "assets/collisionTypes".
+      Call after init(). The engine automatically applies effects when the
+      player enters a matching collision type.
+
+  JSON file format (e.g. assets/collisionTypes/water.json):
+      {
+          "name": "water",
+          "speedScale": 0.5,
+          "gravityScale": 0.5,
+          "canSwim": true,
+          "swimUpSpeed": 1.0,
+          "exitJumpForce": 3.5,
+          "entryVelocityScale": 0.3,
+          "useTileFlowDir": false,
+          "flowForce": 0.0
+      }
+
+  Fields (all optional, defaults shown):
+      name               - must match a collision type: "water" or "river"
+      speedScale    1.0  - movement speed multiplier while inside
+      gravityScale  1.0  - gravity multiplier while inside
+      canSwim       false - hold SPACE to float up
+      swimUpSpeed   1.0  - how fast swimming moves you up
+      exitJumpForce 0.0  - jump force when leaving while holding SPACE
+      entryVelocityScale 1.0 - multiply vertical velocity on entry
+                               (0.3 = dampen fall speed by 70%)
+      useTileFlowDir false - read the tile's flowDir and push the entity
+      flowForce     0.0  - push strength in units/sec (requires useTileFlowDir)
+
+  Flow force details:
+      When useTileFlowDir is true, the engine checks every tile under the
+      entity's footprint, calculates how much of the footprint overlaps each
+      tile, and applies flowForce in each tile's flow direction weighted by
+      that overlap. Multiple tiles stack. Uses entity.move() so the push
+      respects solid collision.
+
+  WorldTile.flowDir:
+      -1 = none, 0 = North, 1 = East, 2 = South, 3 = West.
+      Set via engine.placeBlock(name, x, z, height, flowDir).
+
+  engine.playerCollisionState
+      Tracks what collision type the player is currently in.
+      currentType  - CLTileType the player is standing in
+      previousType - what it was last frame
+      inside(type) / justEntered(type) / justExited(type) — query helpers
+
+  engine.paused
+      When true, all physics/movement/collision effects are skipped.
+      Rendering and onUpdate/onDrawUI still run.
+
+
+--- RUNTIME CONTROLS --------------------------------------------------
+These work while the game is running:
+
+  WASD      - Move (direction depends on camera mode)    [input.h]
+  SPACE     - Jump                                       [input.h]
+  1-9, 0    - Select hotbar slot                         [inventory.h]
+  Scroll    - Scroll hotbar selection                    [inventory.h]
+  E         - Toggle inventory (default keybind)         [inventory.h]
+  F1        - Toggle collision debug view                [engine.h]
+  ESC       - Close window                               [engine.h]
+
+
+--- ENGINE FILES ------------------------------------------------------
+  engine.h           - Main engine struct, game loop, save/load
+  entity.h           - Base entity (position, physics, model, draw)
+  camera.h           - Camera modes and target following
+  input.h            - WASD input mapped to view modes
+  world.h            - Chunk-based tile storage (thread-safe)
+  world_actions.h    - World mutation interface + mob hooks
+  collision.h        - Collision boxes and sweep tests (per-entity)
+  collision_effects.h - Data-driven collision effects (water, river flow)
+  gravity.h          - Gravity physics
+  registry.h         - Block/item definitions + JSON loading + model loading
+  inventory.h        - Inventory + HotBar (data + helpers like
+                       stackItems, stackThenFill, getSlotSafe)
+  save.h             - Binary save format helpers (w/r, wStr/rStr,
+                       wVec3/rVec3, wColor/rColor, wSlots/rSlots)
+  inventory_ui.h     - Inventory/HotBar UI (CustomPanelUI, InventoryUI,
+                       HotBarUI, InventoryManagerUI, shiftClickTransfer)
+  json.h             - Flat JSON parser (handles escaped quotes)
+  tile_rng.h         - Deterministic per-tile random numbers
+  FastNoiseLite.h    - Noise generation (third-party, bundled)
+
+
+========================================================================
+  EXAMPLE
+========================================================================
+
+  #include "engine/engine.h"
+
+  int main() {
+      Engine engine;
+      engine.init("My Game");
+      engine.loadBlocks("assets/blocks");
+      engine.loadItems("assets/items");
+      engine.setView(VIEW_2_5D);
+      engine.setSpawn(0, 2, 0);
+
+      // Inventory + hotbar
+      engine.inventory.init(24, KEY_E);
+      engine.hotbar.init(5);
+      engine.hotbar.setSlot(0, "grassBlock", 10);
+
+      // World generation on a background thread
+      engine.buildAsync([&]() {
+          for (int x = -50; x <= 50; x++)
+              for (int z = -50; z <= 50; z++)
+                  engine.placeBlock("grassBlock", x, z);
+
+          for (int i = 0; i < 4; i++)
+              engine.placeBlock("stoneBlock", 2 + i, 0, 0.25f * (i + 1));
+      });
+
+      // Per-frame logic
+      engine.onUpdate = [&](float dt) {
+          engine.inventory.update();
+          engine.hotbar.update();
+      };
+
+      // 2D UI (always on top)
+      engine.onDrawUI = [&]() {
+          engine.hotbar.draw();
+          engine.inventory.draw();
+          if (engine.isBuilding())
+              DrawText("Building world...", 10, 60, 20, YELLOW);
+      };
+
+      engine.run();
+  }

@@ -1,0 +1,11 @@
+{
+    "name": "river",
+    "speedScale": 0.7,
+    "gravityScale": 0.5,
+    "canSwim": true,
+    "swimUpSpeed": 1.0,
+    "exitJumpForce": 3.5,
+    "entryVelocityScale": 0.3,
+    "useTileFlowDir": true,
+    "flowForce": 0.8
+}

@@ -1,0 +1,824 @@
+========================================================================
+  ENGINE EXAMPLES
+  Copy-paste code snippets for common tasks
+========================================================================
+
+
+  TABLE OF CONTENTS
+  -----------------
+
+  GETTING STARTED
+    Minimal Game ........................................ line 61
+    Starter Template .................................... line 79
+
+  SETUP — STEP BY STEP
+    Window + Init ....................................... line 191
+    Loading Assets ...................................... line 201
+    Player Setup ........................................ line 215
+    Inventory + Hotbar Setup ............................ line 231
+    Save / Load ......................................... line 257
+
+  INVENTORY + HOTBAR USAGE
+    Adding / Removing Items ............................. line 296
+    Reading the Selected Hotbar Item .................... line 320
+    Resizing at Runtime ................................. line 340
+
+  CUSTOM UI
+    Custom Slot Drawing ................................. line 368
+    Custom Background for Panels ........................ line 399
+    Slot Overlays ....................................... line 413
+    Custom Panel UI (full manual layout) ................ line 439
+    HUD Text ............................................ line 467
+
+  WORLD GENERATION
+    Background World Generation ......................... line 486
+    Noise-Based Terrain ................................. line 511
+    Tile RNG ............................................ line 533
+    Seed-Based Generation ............................... line 552
+
+  BLOCKS + TILES
+    Placing / Removing Blocks ........................... line 570
+    Reading Tile Data ................................... line 584
+    Iterating Nearby Tiles .............................. line 595
+    Block JSON Definitions .............................. line 605
+    Item JSON Definitions ............................... line 642
+
+  CAMERA + INPUT
+    Switching Camera Views .............................. line 667
+    Collision Type Checks ............................... line 688
+    Collision Effects (water/river behavior) ............ line 707
+
+  COMMON PATTERNS
+    Pause Menu .......................................... line 766
+    Fullscreen Toggle ................................... line 798
+    Disable ESC Closing the Window ...................... line 805
+
+  Runtime Controls ...................................... line 813
+
+
+========================================================================
+
+
+--- MINIMAL GAME (bare minimum to get something on screen) -----------
+
+  #include "engine/engine.h"
+
+  int main() {
+      Engine engine;
+      engine.init("My Game");
+      engine.loadBlocks("assets/blocks");
+      engine.setSpawn(0, 2, 0);
+
+      for (int x = -5; x <= 5; x++)
+          for (int z = -5; z <= 5; z++)
+              engine.placeBlock("grassBlock", x, z);
+
+      engine.run();
+  }
+
+
+--- STARTER TEMPLATE (everything wired up, ready to build on) --------
+
+  #include "engine/engine.h"
+  #include "engine/FastNoiseLite.h"
+  #include <filesystem>
+
+  int main() {
+      Engine engine;
+      engine.init("My Game");
+      SetExitKey(KEY_NULL);
+
+      engine.loadBlocks("assets/blocks");
+      engine.loadItems("assets/items");
+      engine.setView(VIEW_2_5D);
+      engine.setSpawn(0, 5, 0);
+      engine.seed = GetRandomValue(0, 999999);
+
+      // Inventory + hotbar
+      engine.inventory.init(24, KEY_E);
+      engine.hotbar.init(9);
+
+      // Icon lookup — so inventory/hotbar slots show images
+      // Checks block registry first, then item registry
+      auto iconLookup = [&](const std::string& name) -> const Texture2D* {
+          const BlockDef* b = engine.registry.get(name);
+          if (b && b->iconLoaded) return &b->icon;
+          const ItemDef* i = engine.itemRegistry.get(name);
+          if (i && i->iconLoaded) return &i->icon;
+          return nullptr;
+      };
+
+      // Inventory manager — handles click, drag, shift-click, cursor
+      InventoryManager invManager;
+      invManager.init(&engine.inventory, &engine.hotbar);
+      invManager.iconLookup = iconLookup;
+
+      // Starting items
+      engine.hotbar.setSlot(0, "grassBlock", 64);
+      engine.hotbar.setSlot(1, "stoneBlock", 64);
+
+      // Generate terrain on background thread
+      engine.buildAsync([&]() {
+          FastNoiseLite noise;
+          noise.SetNoiseType(FastNoiseLite::NoiseType_Perlin);
+          noise.SetFrequency(0.015f);
+          noise.SetSeed(engine.seed);
+
+          for (int x = -100; x <= 100; x++)
+              for (int z = -100; z <= 100; z++) {
+                  float n = noise.GetNoise((float)x, (float)z);
+                  float h = n * 4.0f;
+                  if (h > 1.5f)
+                      engine.placeBlock("stoneBlock", x, z, h);
+                  else
+                      engine.placeBlock("grassBlock", x, z, h);
+              }
+      });
+
+      // Game state
+      bool paused = false;
+
+      engine.onUpdate = [&](float dt) {
+          if (IsKeyPressed(KEY_ESCAPE)) {
+              if (engine.inventory.open)
+                  engine.inventory.open = false;
+              else
+                  paused = !paused;
+          }
+
+          // Save / Load
+          if (IsKeyPressed(KEY_F5)) {
+              std::filesystem::create_directories("saves");
+              engine.save("saves/world.sav");
+          }
+          if (IsKeyPressed(KEY_F9)) engine.load("saves/world.sav");
+          if (IsKeyPressed(KEY_F11)) ToggleFullscreen();
+
+          if (paused) return;
+          invManager.update();
+      };
+
+      engine.onDrawUI = [&]() {
+          invManager.draw();
+
+          // HUD
+          DrawText("F5 Save | F9 Load | F11 Fullscreen", 10, 60, 16, GRAY);
+
+          if (engine.isBuilding())
+              DrawText("Generating world...", 10, 80, 20, YELLOW);
+
+          if (paused) {
+              DrawRectangle(0, 0, GetScreenWidth(), GetScreenHeight(),
+                            { 0, 0, 0, 150 });
+              const char* txt = "PAUSED";
+              int w = MeasureText(txt, 40);
+              DrawText(txt, (GetScreenWidth() - w) / 2,
+                       GetScreenHeight() / 2 - 20, 40, WHITE);
+              DrawText("ESC to resume",
+                       (GetScreenWidth() - MeasureText("ESC to resume", 18)) / 2,
+                       GetScreenHeight() / 2 + 30, 18, GRAY);
+          }
+      };
+
+      engine.run();
+  }
+
+
+========================================================================
+  SETUP — STEP BY STEP
+========================================================================
+
+
+--- WINDOW + INIT -----------------------------------------------------
+
+  Engine engine;
+  engine.init("My Game");           // fullscreen at native resolution
+  engine.init("My Game", false);    // windowed mode
+
+  // Disable ESC closing the window (call AFTER init)
+  SetExitKey(KEY_NULL);
+
+
+--- LOADING ASSETS ----------------------------------------------------
+
+  // Load block/item definitions from JSON folders
+  engine.loadBlocks("assets/blocks");
+  engine.loadItems("assets/items");
+
+  // These auto-detect models and icons from default folders:
+  //   assets/blockModels/  assets/blockIcons/
+  //   assets/itemModels/   assets/itemIcons/
+  //
+  // Custom folders:
+  engine.loadBlocks("assets/blocks", "my/models", "my/icons");
+
+
+--- PLAYER SETUP ------------------------------------------------------
+
+  engine.setSpawn(0, 5, 0);   // where the player starts (x, y, z)
+  engine.setView(VIEW_2_5D);  // VIEW_2_5D, VIEW_TOPDOWN, VIEW_3D
+
+  // Load a 3D model for the player
+  engine.player.loadModel("assets/player.glb", 1.8f);
+
+  // Tweak physics
+  engine.player.speed = 8.0f;
+  engine.player.jumpForce = 6.0f;
+  engine.player.maxStepHeight = 0.5f;
+  engine.player.width = 0.5f;
+  engine.player.depth = 0.5f;
+
+
+--- INVENTORY + HOTBAR SETUP ------------------------------------------
+
+  // Init
+  engine.inventory.init(24, KEY_E);  // 24 slots, E to open/close
+  engine.hotbar.init(9);             // 9 slots (keys 1-9)
+
+  // Icon lookup — needed so slots show images instead of text
+  auto iconLookup = [&](const std::string& name) -> const Texture2D* {
+      const BlockDef* b = engine.registry.get(name);
+      if (b && b->iconLoaded) return &b->icon;
+      const ItemDef* i = engine.itemRegistry.get(name);
+      if (i && i->iconLoaded) return &i->icon;
+      return nullptr;
+  };
+
+  // Inventory manager — ties inventory + hotbar + cursor together
+  // Handles left-click pickup/place, right-click split, shift-click transfer
+  InventoryManager invManager;
+  invManager.init(&engine.inventory, &engine.hotbar);
+  invManager.iconLookup = iconLookup;
+
+  // Wire up (must call every frame)
+  engine.onUpdate = [&](float dt) { invManager.update(); };
+  engine.onDrawUI = [&]() { invManager.draw(); };
+
+
+--- SAVE / LOAD -------------------------------------------------------
+
+  // Basic — F5 to save, F9 to load
+  engine.onUpdate = [&](float dt) {
+      if (IsKeyPressed(KEY_F5)) {
+          std::filesystem::create_directories("saves");
+          engine.save("saves/world.sav");
+      }
+      if (IsKeyPressed(KEY_F9)) {
+          engine.load("saves/world.sav");
+      }
+  };
+
+  // engine.save() saves everything:
+  //   - seed, player position + angle
+  //   - all inventory slots (names + counts)
+  //   - all hotbar slots + selected index
+  //   - all world tiles (position, type, height, color, blockName)
+  //
+  // engine.load() replaces all current state.
+  // Returns true on success, false on failure.
+  // Thread-safe — can save while buildAsync is running.
+
+  // Multiple save slots:
+  if (IsKeyDown(KEY_LEFT_CONTROL)) {
+      if (IsKeyPressed(KEY_ONE)) engine.save("saves/slot1.sav");
+      if (IsKeyPressed(KEY_TWO)) engine.save("saves/slot2.sav");
+  }
+  if (IsKeyDown(KEY_LEFT_ALT)) {
+      if (IsKeyPressed(KEY_ONE)) engine.load("saves/slot1.sav");
+      if (IsKeyPressed(KEY_TWO)) engine.load("saves/slot2.sav");
+  }
+
+
+========================================================================
+  INVENTORY + HOTBAR USAGE
+========================================================================
+
+
+--- ADDING / REMOVING ITEMS -------------------------------------------
+
+  // Add items (auto-stacks onto matching slots, then fills empties)
+  engine.inventory.addItem("stoneBlock", 10);
+
+  // Custom max stack size
+  engine.inventory.addItem("specialItem", 3, 16);  // max 16 per slot
+
+  // Returns leftover count (0 = everything fit)
+  int leftover = engine.inventory.addItem("stoneBlock", 999);
+
+  // Check if there's room before adding
+  if (engine.inventory.hasSpace("stoneBlock")) { ... }
+
+  // Remove items (returns how many were actually removed)
+  int removed = engine.inventory.removeItem("stoneBlock", 5);
+
+  // Count total across all slots
+  int total = engine.inventory.countItem("stoneBlock");
+
+  // Set a hotbar slot directly
+  engine.hotbar.setSlot(0, "grassBlock", 64);
+
+
+--- READING THE SELECTED HOTBAR ITEM ---------------------------------
+
+  const ItemSlot* sel = engine.hotbar.getSelected();
+  if (sel && !sel->empty()) {
+      // sel->itemName, sel->count
+  }
+
+  // Use selected item to place blocks:
+  engine.onUpdate = [&](float dt) {
+      if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && !engine.inventory.open) {
+          ItemSlot* sel = engine.hotbar.getSelected();
+          if (sel && !sel->empty()) {
+              engine.placeBlock(sel->itemName, targetX, targetZ);
+              sel->count--;
+              if (sel->count <= 0) sel->clear();
+          }
+      }
+  };
+
+
+--- RESIZING AT RUNTIME -----------------------------------------------
+
+  // Resize inventory (WARNING: init clears all items)
+  engine.inventory.init(36, KEY_E);
+
+  // Resize without losing items — backup first:
+  std::vector<ItemSlot> backup = engine.inventory.slots;
+  engine.inventory.init(36, KEY_E);
+  for (int i = 0; i < (int)backup.size() && i < 36; i++)
+      engine.inventory.slots[i] = backup[i];
+
+  // Change grid columns (visual only)
+  engine.inventory.columns = 6;
+
+  // Resize hotbar — same pattern:
+  std::vector<ItemSlot> hbBackup = engine.hotbar.slots;
+  int oldSel = engine.hotbar.selected;
+  engine.hotbar.init(7);
+  for (int i = 0; i < (int)hbBackup.size() && i < 7; i++)
+      engine.hotbar.slots[i] = hbBackup[i];
+  engine.hotbar.selected = (oldSel < 7) ? oldSel : 0;
+
+
+========================================================================
+  CUSTOM UI
+========================================================================
+
+
+--- CUSTOM SLOT DRAWING (replace the default grey boxes) --------------
+
+  // Replace inventory slot rendering:
+  invManager.invUI.onDrawSlot = [](const ItemSlot& slot, float x, float y,
+                                    float size, bool selected) {
+      DrawRectangleRounded({ x, y, size, size }, 0.2f, 4,
+                            selected ? BLUE : DARKGRAY);
+
+      if (!slot.empty()) {
+          DrawText(slot.itemName.c_str(), (int)x + 4, (int)y + 4, 14, WHITE);
+          if (slot.count > 1) {
+              DrawText(TextFormat("%d", slot.count),
+                       (int)(x + size - 20), (int)(y + size - 16), 14, YELLOW);
+          }
+      }
+  };
+
+  // Replace hotbar slot rendering separately:
+  invManager.hbUI.onDrawSlot = [](const ItemSlot& slot, float x, float y,
+                                   float size, bool selected) {
+      Color bg = selected ? Color{ 60, 60, 140, 230 }
+                          : Color{ 30, 30, 30, 200 };
+      DrawRectangle((int)x, (int)y, (int)size, (int)size, bg);
+      DrawRectangleLines((int)x, (int)y, (int)size, (int)size, WHITE);
+
+      if (!slot.empty()) {
+          DrawText(slot.itemName.c_str(), (int)x + 2, (int)y + 2, 12, WHITE);
+      }
+  };
+
+
+--- CUSTOM BACKGROUND FOR PANELS -------------------------------------
+
+  // Draw a custom background behind the inventory grid:
+  invManager.invUI.panel.onDrawBackground =
+      [](float x, float y, float w, float h) {
+          DrawRectangleRounded({ x - 4, y - 4, w + 8, h + 8 }, 0.1f, 4,
+                                { 10, 10, 30, 240 });
+          DrawText("INVENTORY", (int)x + 6, (int)y + 4, 20, WHITE);
+      };
+
+  // Or use a background texture:
+  invManager.invUI.panel.setBackground("assets/ui/inventory_bg.png");
+
+
+--- SLOT OVERLAYS (extra drawing per slot) ----------------------------
+
+  // Add number labels above hotbar slots:
+  invManager.hbUI.panel.onDrawSlotOverlay =
+      [](int index, float x, float y, float size, bool selected) {
+          const char* label = (index < 9) ? TextFormat("%d", index + 1) : "0";
+          int labelW = MeasureText(label, 14);
+          DrawText(label, (int)(x + size / 2 - labelW / 2), (int)(y - 16), 14,
+                   selected ? WHITE : GRAY);
+      };
+
+  // Add tooltips when hovering a slot:
+  invManager.invUI.panel.onDrawSlotOverlay =
+      [&](int index, float x, float y, float size, bool selected) {
+          Vector2 mouse = GetMousePosition();
+          if (mouse.x >= x && mouse.x < x + size &&
+              mouse.y >= y && mouse.y < y + size) {
+              const ItemSlot* slot = engine.inventory.getSlot(index);
+              if (slot && !slot->empty()) {
+                  DrawText(slot->itemName.c_str(),
+                           (int)mouse.x + 12, (int)mouse.y - 14, 16, YELLOW);
+              }
+          }
+      };
+
+
+--- CUSTOM PANEL UI (full manual layout) ------------------------------
+
+  // CustomPanelUI lets you place slots anywhere on screen.
+  // Use this for crafting grids, chests, shops, etc.
+
+  CustomPanelUI craftPanel;
+  craftPanel.setBackground("assets/ui/crafting.png");
+
+  // Place slots at pixel offsets from the panel's top-left:
+  craftPanel.setSlot(0, 10, 30, 48);   // slot 0 at (10, 30), size 48
+  craftPanel.setSlot(1, 70, 30, 48);   // slot 1 at (70, 30)
+  craftPanel.setSlot(2, 40, 90, 48);   // output slot
+
+  // Point it at your data:
+  std::vector<ItemSlot> craftSlots(3);
+  int craftSlotCount = 3;
+  CursorItem craftCursor;
+
+  craftPanel.slots = &craftSlots;
+  craftPanel.slotCount = &craftSlotCount;
+  craftPanel.cursor = &craftCursor;
+  craftPanel.iconLookup = iconLookup;
+
+  // In your update/draw:
+  craftPanel.update();  // handles click interactions
+  craftPanel.draw();    // renders the panel
+
+
+--- HUD TEXT ----------------------------------------------------------
+
+  engine.onDrawUI = [&]() {
+      // Top-left info
+      DrawText(TextFormat("Seed: %d", engine.seed), 10, 60, 20, WHITE);
+      DrawText(TextFormat("HP: %d / %d", hp, maxHp), 10, 80, 20, RED);
+
+      // Center screen
+      const char* msg = "Welcome!";
+      int w = MeasureText(msg, 30);
+      DrawText(msg, (GetScreenWidth() - w) / 2, 100, 30, YELLOW);
+  };
+
+
+========================================================================
+  WORLD GENERATION
+========================================================================
+
+
+--- BACKGROUND WORLD GENERATION ---------------------------------------
+
+  // Generate on a background thread so the game starts instantly:
+  engine.buildAsync([&]() {
+      for (int x = -200; x <= 200; x++)
+          for (int z = -200; z <= 200; z++)
+              engine.placeBlock("grassBlock", x, z);
+  });
+
+  // Show loading message:
+  engine.onDrawUI = [&]() {
+      if (engine.isBuilding())
+          DrawText("Generating world...", 10, 60, 20, YELLOW);
+  };
+
+  // Freeze the player until done:
+  engine.onUpdate = [&](float dt) {
+      if (engine.isBuilding()) return;
+      // normal gameplay...
+  };
+
+  // Or block until done (synchronous):
+  engine.waitForBuild();
+
+
+--- NOISE-BASED TERRAIN -----------------------------------------------
+
+  #include "engine/FastNoiseLite.h"
+
+  FastNoiseLite noise;
+  noise.SetNoiseType(FastNoiseLite::NoiseType_Perlin);
+  noise.SetFrequency(0.02f);
+  noise.SetSeed(engine.seed);
+
+  engine.buildAsync([&]() {
+      for (int x = -100; x <= 100; x++)
+          for (int z = -100; z <= 100; z++) {
+              float n = noise.GetNoise((float)x, (float)z);
+              float h = n * 3.0f;
+              if (h > 1.0f)
+                  engine.placeBlock("stoneBlock", x, z, h);
+              else
+                  engine.placeBlock("grassBlock", x, z, h);
+          }
+  });
+
+
+--- TILE RNG (deterministic random per tile) --------------------------
+
+  #include "engine/core/tile_rng.h"
+
+  // Sparse forest — 5% chance of tree per tile
+  for (int x = -50; x <= 50; x++)
+      for (int z = -50; z <= 50; z++) {
+          engine.placeBlock("grassBlock", x, z);
+          if (tileRandChance(x, z, 0.05f))
+              engine.placeBlock("treeBlock", x, z, 1.0f);
+      }
+
+  // Multiple random streams using channel parameter:
+  float heightVar = tileRandFloat(x, z, 0);     // channel 0
+  int biomeType   = tileRandInt(x, z, 4, 1);    // channel 1: 0-3
+
+  // Same coords + channel always gives the same result (deterministic)
+
+
+--- SEED-BASED GENERATION ---------------------------------------------
+
+  engine.seed = 12345;
+  // or randomize:
+  engine.seed = GetRandomValue(0, 999999);
+
+  FastNoiseLite noise;
+  noise.SetSeed(engine.seed);
+  // ... generate world using noise ...
+
+  // Seed is saved/loaded automatically with engine.save/load
+
+
+========================================================================
+  BLOCKS + TILES
+========================================================================
+
+
+--- PLACING / REMOVING BLOCKS -----------------------------------------
+
+  // By registry name (looks up color, collision, etc. from JSON)
+  engine.placeBlock("grassBlock", 5, 10);
+  engine.placeBlock("stoneBlock", 5, 10, 1.0f);  // 1 block high
+
+  // By raw RGB (no JSON needed)
+  engine.placeBlock(255, 0, 0, 5, 10, 0.0f);          // red
+  engine.placeBlock(255, 0, 0, 128, 5, 10, 0.0f);      // red, half transparent
+
+  // Remove
+  engine.removeBlock(5, 10);
+
+
+--- READING TILE DATA -------------------------------------------------
+
+  if (engine.world.hasTile(5, 10)) { /* tile exists */ }
+
+  auto tile = engine.world.getTile(5, 10);
+  if (tile) {
+      float h = tile->height;
+      std::string name = tile->blockName;
+  }
+
+
+--- ITERATING NEARBY TILES -------------------------------------------
+
+  int cx = (int)engine.player.position.x;
+  int cz = (int)engine.player.position.z;
+  engine.world.forEachTileInRadius(cx, cz, 10,
+      [](int x, int z, const WorldTile& tile) {
+          // only visits tiles within 10 blocks of center
+      });
+
+
+--- BLOCK JSON DEFINITIONS -------------------------------------------
+
+  // assets/blocks/grassBlock.json
+  {
+      "name": "grassBlock",
+      "collisionType": "solid",
+      "color": [60, 160, 50, 255],
+      "icon": "assets/blockIcons/grassBlock.png"
+  }
+
+  // assets/blocks/waterBlock.json
+  {
+      "name": "waterBlock",
+      "collisionType": "water",
+      "color": [30, 100, 200, 180]
+  }
+
+  // assets/blocks/fancyRock.json (with 3D model)
+  {
+      "name": "fancyRock",
+      "formatType": "glb",
+      "modelFile": "assets/blockModels/fancyRock.glb",
+      "modelSize": [1, 2, 1],
+      "collisionType": "solid",
+      "color": [130, 130, 130]
+  }
+
+  // Fields (all optional except name):
+  //   name          - identifier, defaults to filename if omitted
+  //   formatType    - "cube" (default) or "glb"
+  //   modelFile     - path to .glb (auto-detected from blockModels/)
+  //   collisionType - "solid" (default), "water", or "river"
+  //   color         - [r, g, b] or [r, g, b, a]
+  //   icon          - path to icon image (auto-detected from blockIcons/)
+  //   lootTable     - path to loot table JSON (for game logic)
+
+
+--- ITEM JSON DEFINITIONS ---------------------------------------------
+
+  // assets/items/woodSword.json
+  {
+      "name": "woodSword",
+      "model": "assets/itemModels/woodSword.glb",
+      "icon": "assets/itemIcons/woodSword.png"
+  }
+
+  // Minimal — name auto-detected from filename:
+  // assets/items/ironPickaxe.json
+  {
+      "icon": "assets/itemIcons/ironPickaxe.png"
+  }
+
+  // Auto-detection: if woodSword.glb exists in itemModels/ and the
+  // item has no "model" set, it's automatically assigned. Same for
+  // .png/.jpg icons in itemIcons/.
+
+
+========================================================================
+  CAMERA + INPUT
+========================================================================
+
+
+--- SWITCHING CAMERA VIEWS --------------------------------------------
+
+  // Set view at startup
+  engine.setView(VIEW_2_5D);    // isometric (default)
+  engine.setView(VIEW_TOPDOWN); // straight down
+  engine.setView(VIEW_3D);      // behind player
+
+  // Toggle views at runtime:
+  engine.onUpdate = [&](float dt) {
+      if (IsKeyPressed(KEY_V)) {
+          static int view = 0;
+          view = (view + 1) % 3;
+          ViewMode modes[] = { VIEW_2_5D, VIEW_TOPDOWN, VIEW_3D };
+          engine.setView(modes[view]);
+      }
+  };
+
+  // Custom camera offset (freeform, not limited to presets):
+  engine.camera.offset = { -20.0f, 30.0f, -20.0f };
+
+
+--- COLLISION TYPE CHECKS ---------------------------------------------
+
+  // Check if player's feet are in water:
+  bool inWater = engine.player.isBaseInCollisionType(CL_TILE_WATER);
+
+  // Check if any part of the body overlaps water:
+  bool bodyInWater = engine.player.isInCollisionType(CL_TILE_WATER);
+
+  // Slow movement in water:
+  engine.onUpdate = [&](float dt) {
+      InputDir dir = getMovementInput(engine.camera.mode);
+      float speedMult = engine.player.isBaseInCollisionType(CL_TILE_WATER)
+                        ? 0.5f : 1.0f;
+      engine.player.move(dir.x, dir.z, dt, speedMult);
+  };
+
+  // Types: CL_TILE_SOLID, CL_TILE_WATER, CL_TILE_RIVER
+
+
+--- COLLISION EFFECTS (data-driven water/river behavior) --------------
+
+  // Load effect definitions at startup:
+  engine.loadCollisionEffects();  // loads from assets/collisionTypes/
+
+  // That's it — the engine automatically applies effects when the
+  // player enters water or river tiles. No code needed per effect.
+
+  // assets/collisionTypes/water.json
+  {
+      "name": "water",
+      "speedScale": 0.5,
+      "gravityScale": 0.5,
+      "canSwim": true,
+      "swimUpSpeed": 1.0,
+      "exitJumpForce": 3.5,
+      "entryVelocityScale": 0.3
+  }
+
+  // assets/collisionTypes/river.json (with flow force)
+  {
+      "name": "river",
+      "speedScale": 0.7,
+      "gravityScale": 0.5,
+      "canSwim": true,
+      "swimUpSpeed": 1.0,
+      "exitJumpForce": 3.5,
+      "entryVelocityScale": 0.3,
+      "useTileFlowDir": true,
+      "flowForce": 0.8
+  }
+
+  // Flow force reads each tile's flowDir and pushes the entity.
+  // Force is proportional to how much of the entity's footprint
+  // overlaps each tile. Multiple tiles stack. Respects solid collision.
+
+  // To place a river tile with flow direction:
+  engine.placeBlock("river", x, z, height, flowDir);
+  // flowDir: -1 = none, 0 = North, 1 = East, 2 = South, 3 = West
+
+  // Check what collision type the player is in:
+  if (engine.playerCollisionState.inside(CL_TILE_WATER)) { ... }
+  if (engine.playerCollisionState.justEntered(CL_TILE_RIVER)) { ... }
+  if (engine.playerCollisionState.justExited(CL_TILE_WATER)) { ... }
+
+  // Apply effects to a custom entity (mob, NPC, etc.):
+  CollisionEffectState mobState;  // create once per entity
+  // each frame:
+  auto fx = applyCollisionEffects(mob, mobState, engine.collisionEffects, dt, &engine.world);
+  mob.move(inputX, inputZ, dt, fx.speedScale);
+  mob.applyGravity(dt, fx.gravityScale);
+  applyCollisionExitEffects(mob, mobState, engine.collisionEffects);
+
+
+========================================================================
+  COMMON PATTERNS
+========================================================================
+
+
+--- PAUSE MENU --------------------------------------------------------
+
+  bool paused = false;
+  SetExitKey(KEY_NULL);
+
+  engine.onUpdate = [&](float dt) {
+      if (IsKeyPressed(KEY_ESCAPE)) {
+          if (engine.inventory.open) {
+              engine.inventory.open = false;
+          } else {
+              paused = !paused;
+          }
+      }
+      if (paused) return;
+
+      // normal gameplay...
+      invManager.update();
+  };
+
+  engine.onDrawUI = [&]() {
+      invManager.draw();
+
+      if (paused) {
+          DrawRectangle(0, 0, GetScreenWidth(), GetScreenHeight(),
+                        { 0, 0, 0, 150 });
+          int w = MeasureText("PAUSED", 40);
+          DrawText("PAUSED", (GetScreenWidth() - w) / 2,
+                   GetScreenHeight() / 2 - 20, 40, WHITE);
+      }
+  };
+
+
+--- FULLSCREEN TOGGLE -------------------------------------------------
+
+  engine.onUpdate = [&](float dt) {
+      if (IsKeyPressed(KEY_F11)) ToggleFullscreen();
+  };
+
+
+--- DISABLE ESC CLOSING THE WINDOW -----------------------------------
+
+  engine.init("My Game");
+  SetExitKey(KEY_NULL);  // call AFTER init()
+
+  // Now ESC is free — window X button still works to close.
+
+
+========================================================================
+  RUNTIME CONTROLS (default keybinds)
+========================================================================
+
+  WASD      - Move (direction depends on camera mode)
+  SPACE     - Jump
+  1-9, 0    - Select hotbar slot
+  Scroll    - Scroll hotbar selection
+  E         - Toggle inventory (default, configurable)
+  F1        - Toggle collision debug view
+  ESC       - Close window (unless disabled with SetExitKey)

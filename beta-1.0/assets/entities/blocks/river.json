@@ -1,0 +1,6 @@
+{
+    "name": "river",
+    "formatType": "cube",
+    "collisionType": "river",
+    "color": [30, 90, 200, 255]
+}

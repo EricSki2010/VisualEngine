@@ -1,0 +1,149 @@
+========================================================================
+  FOLDER EXPECTATIONS
+  Where the engine looks for files and what it expects to find
+========================================================================
+
+
+--- EXPECTED PROJECT STRUCTURE ----------------------------------------
+
+  project_root/
+      assets/
+          blocks/              <- Block definition JSON files
+          blockModels/         <- .glb models for blocks (auto-detected)
+          items/               <- Item definition JSON files
+          itemModels/          <- .glb models for items (auto-detected)
+      src/
+          engine/              <- Engine headers (do not modify for game logic)
+          game/                <- Your game code goes here
+
+
+--- assets/blocks/ ----------------------------------------------------
+
+  What:     JSON files that define block types
+  Loaded:   engine.loadBlocks("assets/blocks")
+  Format:   One .json file per block type
+  Naming:   Filename becomes the block name if "name" is not in the JSON
+            e.g. grassBlock.json -> block name "grassBlock"
+
+  Example file (grassBlock.json):
+      {
+          "name": "grassBlock",
+          "formatType": "cube",
+          "collisionType": "solid",
+          "color": [60, 160, 50, 255]
+      }
+
+  Supported fields:
+      name           - Block identifier (optional, defaults to filename)
+      formatType     - "cube" (default) or "glb"
+      modelFile      - Path to .glb model (optional, see blockModels)
+      collisionType  - "solid" (default), "water", or "river"
+      color          - [r, g, b] or [r, g, b, a] (optional for glb)
+      lootTable      - Path to loot table JSON (for game logic)
+
+
+--- assets/blockModels/ -----------------------------------------------
+
+  What:     .glb model files for blocks
+  Loaded:   Automatically scanned during engine.loadBlocks()
+  Naming:   Must match block name exactly
+            e.g. block "grassBlock" looks for grassBlock.glb
+
+  How it works:
+      1. Engine loads all JSONs from assets/blocks/
+      2. Engine scans assets/blockModels/ for .glb files
+      3. If a .glb matches a block name AND that block has no
+         modelFile set, it auto-assigns the model
+      4. The block's formatType is set to "glb" automatically
+
+  You can also set modelFile directly in the JSON:
+      {
+          "name": "fancyRock",
+          "formatType": "glb",
+          "modelFile": "assets/blockModels/fancyRock.glb"
+      }
+
+  Priority:
+      modelFile in JSON > auto-detected from blockModels/
+
+
+--- assets/items/ -----------------------------------------------------
+
+  What:     JSON files that define item types (tools, materials, etc.)
+  Loaded:   engine.loadItems("assets/items")
+  Format:   One .json file per item type
+  Naming:   Filename becomes the item name if "name" is not in the JSON
+            e.g. woodSword.json -> item name "woodSword"
+
+  Example file (woodSword.json):
+      {
+          "name": "woodSword",
+          "model": "assets/itemModels/woodSword.glb"
+      }
+
+  Supported fields:
+      name   - Item identifier (optional, defaults to filename)
+      model  - Path to .glb model (optional, see itemModels)
+
+
+--- assets/itemModels/ ------------------------------------------------
+
+  What:     .glb model files for items
+  Loaded:   Automatically scanned during engine.loadItems()
+  Naming:   Must match item name exactly
+            e.g. item "woodSword" looks for woodSword.glb
+
+  Same auto-detection pattern as blocks:
+      1. Engine loads all JSONs from assets/items/
+      2. Engine scans assets/itemModels/ for .glb files
+      3. If a .glb matches an item name AND that item has no
+         model set, it auto-assigns the model
+
+  Priority:
+      model in JSON > auto-detected from itemModels/
+
+
+--- src/engine/ -------------------------------------------------------
+
+  What:     Engine source headers
+  Contains: All engine systems (rendering, physics, input, etc.)
+  Rule:     Game-specific code should NOT go here
+
+  Files:
+      engine.h         - Main engine struct, game loop, save/load
+      entity.h         - Base entity (position, physics, model, draw)
+      camera.h         - Camera modes and target following
+      input.h          - WASD input mapped to view modes
+      world.h          - Chunk-based tile storage (thread-safe)
+      world_actions.h  - World mutation interface + mob hooks
+      collision.h      - Collision boxes and sweep tests (per-entity)
+      gravity.h        - Gravity physics
+      registry.h       - Block definitions, JSON loading, model loading
+      item_registry.h  - Item definitions, JSON loading, model loading
+      inventory.h      - Inventory + HotBar (data + default UI)
+      save.h           - Binary save format helpers
+      tile_rng.h       - Deterministic per-tile random numbers
+      FastNoiseLite.h  - Noise generation (third-party, bundled)
+      information/     - Documentation (this folder)
+
+
+--- src/game/ ---------------------------------------------------------
+
+  What:     Your game-specific code
+  Contains: Everything unique to your game
+
+  Subfolders:
+      game/entities/   - Game-specific entities (player, mobs, NPCs)
+      game/world/      - World generation, biomes, rivers, terrain
+      game/main.cpp    - Your game's entry point
+
+
+--- WORKING DIRECTORY -------------------------------------------------
+
+  The engine expects to run from the project root (where assets/ is).
+  All asset paths are relative to this directory.
+
+  Correct:    cd project_root && ./build_msvc/beta.exe
+  Wrong:      cd build_msvc && ./beta.exe
+
+  run.bat handles this automatically.

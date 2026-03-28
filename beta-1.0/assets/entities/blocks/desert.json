@@ -1,0 +1,6 @@
+{
+    "name": "desert",
+    "formatType": "cube",
+    "collisionType": "solid",
+    "color": [220, 200, 120, 255]
+}

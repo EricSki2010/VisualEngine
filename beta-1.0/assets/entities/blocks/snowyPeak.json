@@ -1,0 +1,6 @@
+{
+    "name": "snowyPeak",
+    "formatType": "cube",
+    "collisionType": "solid",
+    "color": [240, 245, 255, 255]
+}

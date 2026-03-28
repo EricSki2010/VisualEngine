@@ -1,0 +1,5 @@
+-- Configuring done (0.1s)
+-- Generating done (0.0s)
+-- Build files have been written to: E:/Code/eric/V2/beta-1.0/build_msvc
+[1/2] Building CXX object CMakeFiles\beta.dir\src\main.cpp.obj
+[2/2] Linking CXX executable beta.exe

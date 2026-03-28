@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls -lh \"e:\\\\Code\\\\eric\\\\V2/beta-1.0/src/mapCreatorV2\"/*)",
+      "Read(//e//**)",
+      "Bash(vcpkg list:*)",
+      "Bash(conan search:*)"
+    ]
+  }
+}

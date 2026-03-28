@@ -1,0 +1,10 @@
+^E:\CODE\ERIC\V2\MODELEDITOR\BUILD\CMAKEFILES\4D4242CE6E1EE338CAC55C950D4CFD4C\GENERATE.STAMP.RULE
+setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -SE:/Code/eric/V2/modelEditor -BE:/Code/eric/V2/modelEditor/build --check-stamp-list CMakeFiles/generate.stamp.list --vs-solution-file E:/Code/eric/V2/modelEditor/build/modelEditor.sln
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd
