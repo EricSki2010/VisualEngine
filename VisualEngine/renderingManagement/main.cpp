@@ -5,6 +5,8 @@
 const int WIDTH = 800;
 const int HEIGHT = 600;
 
+// test 2
+
 const char* vertexShaderSrc = R"(
 #version 330 core
 layout (location = 0) in vec3 aPos;
