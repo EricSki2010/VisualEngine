@@ -1,7 +1,0 @@
-E:\Code\eric\V2\modelEditor\main.cpp;E:\Code\eric\V2\modelEditor\build\modelEditor.dir\Release\main.obj
-E:\Code\eric\V2\VisualEngine\VisualEngine.cpp;E:\Code\eric\V2\modelEditor\build\modelEditor.dir\Release\VisualEngine.obj
-E:\Code\eric\V2\VisualEngine\renderingManagement\Mesh.cpp;E:\Code\eric\V2\modelEditor\build\modelEditor.dir\Release\Mesh.obj
-E:\Code\eric\V2\VisualEngine\renderingManagement\Scene.cpp;E:\Code\eric\V2\modelEditor\build\modelEditor.dir\Release\Scene.obj
-E:\Code\eric\V2\VisualEngine\renderingManagement\Shader.cpp;E:\Code\eric\V2\modelEditor\build\modelEditor.dir\Release\Shader.obj
-E:\Code\eric\V2\VisualEngine\renderingManagement\Texture.cpp;E:\Code\eric\V2\modelEditor\build\modelEditor.dir\Release\Texture.obj
-E:\glad\src\glad.c;E:\Code\eric\V2\modelEditor\build\modelEditor.dir\Release\glad.obj

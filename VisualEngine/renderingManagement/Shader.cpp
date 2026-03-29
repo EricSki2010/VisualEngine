@@ -22,11 +22,11 @@ Shader::Shader(const char* vertexSrc, const char* fragmentSrc) {
     glDeleteShader(frag);
 }
 
-void Shader::use() {
+void Shader::use() const {
     glUseProgram(program);
 }
 
-unsigned int Shader::getID() {
+unsigned int Shader::getID() const {
     return program;
 }
 

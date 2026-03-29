@@ -90,14 +90,14 @@ struct Registry {
 struct BlockDef : BaseDef {
     std::string collisionType = "solid";
     unsigned char r = 128, g = 128, b = 128, a = 255;
-    uint8_t solidFaces = 0x3F; // default: full cube
+    uint8_t solidFaces = FACE_ALL;
 };
 
 // Calculate solidFaces from .vertex file
 // Checks each of the 6 cube walls: if triangles on that wall cover the full face, it's solid
 inline uint8_t calcSolidFaces(const std::string& vertexFile) {
     std::ifstream file(vertexFile, std::ios::binary);
-    if (!file) return 0x3F;
+    if (!file) return FACE_ALL;
 
     uint32_t vertCount = 0, triCount = 0;
     file.read(reinterpret_cast<char*>(&vertCount), sizeof(vertCount));
@@ -105,7 +105,7 @@ inline uint8_t calcSolidFaces(const std::string& vertexFile) {
 
     if (!file || vertCount > 100000 || triCount > 200000) {
         printf("WARNING: Invalid .vertex file: %s\n", vertexFile.c_str());
-        return 0x3F;
+        return FACE_ALL;
     }
 
     struct Vec3f { float x, y, z; };
@@ -120,7 +120,7 @@ inline uint8_t calcSolidFaces(const std::string& vertexFile) {
 
     if (!file) {
         printf("WARNING: Truncated .vertex file: %s\n", vertexFile.c_str());
-        return 0x3F;
+        return FACE_ALL;
     }
 
     // Single-pass: bin each triangle into its face plane and accumulate area

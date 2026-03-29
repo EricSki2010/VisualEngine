@@ -1,0 +1,18 @@
+# Build artifacts
+**/build/
+*.obj
+*.exe
+*.pdb
+*.ilk
+*.lib
+*.exp
+*.log
+
+# IDE
+.vs/
+*.suo
+*.user
+
+# OS
+Thumbs.db
+Desktop.ini

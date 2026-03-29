@@ -1,8 +1,8 @@
-#include "cubeData.h"
+#include "../VisualEngine/VisualEngine.h"
 
 int main() {
     VE::initWindow(800, 600, "Model Editor");
-    VE::loadMesh("cube", cubeMesh);
+    VE::loadMesh("cube", "assets/cube.mesh");
     VE::setCamera(6, 4, 6, 210, -25);
 
     for (int x = 0; x < 3; x++)

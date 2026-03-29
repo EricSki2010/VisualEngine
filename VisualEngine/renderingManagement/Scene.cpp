@@ -11,11 +11,11 @@ Scene::Scene(float aspectRatio) {
     light.shininess = 32;
 }
 
-glm::mat3 Scene::getNormalMatrix(const glm::mat4& model) {
+glm::mat3 Scene::getNormalMatrix(const glm::mat4& model) const {
     return glm::mat3(glm::transpose(glm::inverse(model)));
 }
 
-void Scene::uploadStaticUniforms(Shader& shader) {
+void Scene::uploadStaticUniforms(Shader& shader) const {
     shader.use();
     glUniformMatrix4fv(shader.loc("projection"), 1, GL_FALSE, glm::value_ptr(projection));
     glUniformMatrix4fv(shader.loc("view"), 1, GL_FALSE, glm::value_ptr(view));
@@ -26,7 +26,7 @@ void Scene::uploadStaticUniforms(Shader& shader) {
     glUniform1i(shader.loc("shininess"), light.shininess);
 }
 
-void Scene::uploadFrameUniforms(Shader& shader, const glm::mat4& model) {
+void Scene::uploadFrameUniforms(Shader& shader, const glm::mat4& model) const {
     glUniformMatrix4fv(shader.loc("model"), 1, GL_FALSE, glm::value_ptr(model));
     glm::mat3 normalMatrix = getNormalMatrix(model);
     glUniformMatrix3fv(shader.loc("normalMatrix"), 1, GL_FALSE, glm::value_ptr(normalMatrix));

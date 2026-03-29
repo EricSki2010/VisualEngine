@@ -5,12 +5,22 @@
 #include <filesystem>
 #include <unordered_map>
 
+enum Face : uint8_t {
+    FACE_POS_X = 0x01,  // right
+    FACE_NEG_X = 0x02,  // left
+    FACE_POS_Y = 0x04,  // top
+    FACE_NEG_Y = 0x08,  // bottom
+    FACE_POS_Z = 0x10,  // front
+    FACE_NEG_Z = 0x20,  // back
+    FACE_ALL   = 0x3F,
+};
+
 #pragma pack(push, 1)
 
 struct ObjectEntry {
     int32_t objectID;       // what object (0 = empty slot)
     float originX, originY, originZ;  // position within the cube
-    uint8_t visibleFaces;   // bitmask: 6 bits for top, bottom, left, right, front, back
+    uint8_t visibleFaces;   // bitmask using Face enum
 };
 
 inline constexpr int MAX_OBJECTS = 5;

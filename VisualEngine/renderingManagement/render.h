@@ -21,8 +21,8 @@ public:
     unsigned int program;
 
     Shader(const char* vertexSrc, const char* fragmentSrc);
-    void use();
-    unsigned int getID();
+    void use() const;
+    unsigned int getID() const;
     int loc(const char* name);
 private:
     unsigned int compile(const char* source, GLenum type);
@@ -36,9 +36,9 @@ public:
     PointLight light;
 
     Scene(float aspectRatio);
-    glm::mat3 getNormalMatrix(const glm::mat4& model);
-    void uploadStaticUniforms(Shader& shader);
-    void uploadFrameUniforms(Shader& shader, const glm::mat4& model);
+    glm::mat3 getNormalMatrix(const glm::mat4& model) const;
+    void uploadStaticUniforms(Shader& shader) const;
+    void uploadFrameUniforms(Shader& shader, const glm::mat4& model) const;
 };
 
 class Texture {
@@ -46,7 +46,7 @@ public:
     unsigned int id;
 
     Texture(const char* filepath);
-    void bind(int unit = 0);
+    void bind(int unit = 0) const;
     static Texture* loadFromFile(const char* filepath);
 };
 

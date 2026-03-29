@@ -174,7 +174,7 @@ bool placeBlock(ActiveChunk& chunk, int x, int y, int z, int32_t blockID, float 
     obj.originX = originX;
     obj.originY = originY;
     obj.originZ = originZ;
-    obj.visibleFaces = 0x3F;
+    obj.visibleFaces = FACE_ALL;
     return addObject(chunk, x, y, z, obj);
 }
 
@@ -185,8 +185,8 @@ bool removeBlock(ActiveChunk& chunk, int x, int y, int z, int32_t blockID) {
 static const int dirs[6][3] = {
     {1,0,0}, {-1,0,0}, {0,1,0}, {0,-1,0}, {0,0,1}, {0,0,-1}
 };
-static const uint8_t faceBit[6]     = { 0x01, 0x02, 0x04, 0x08, 0x10, 0x20 };
-static const uint8_t oppositeBit[6] = { 0x02, 0x01, 0x08, 0x04, 0x20, 0x10 };
+static const uint8_t faceBit[6]     = { FACE_POS_X, FACE_NEG_X, FACE_POS_Y, FACE_NEG_Y, FACE_POS_Z, FACE_NEG_Z };
+static const uint8_t oppositeBit[6] = { FACE_NEG_X, FACE_POS_X, FACE_NEG_Y, FACE_POS_Y, FACE_NEG_Z, FACE_POS_Z };
 
 void recalcAllFaces(ActiveChunk& chunk, const BlockRegistry& blocks) {
     // Build a flat lookup: blockID -> solidFaces, to avoid repeated hash lookups
@@ -207,7 +207,7 @@ void recalcAllFaces(ActiveChunk& chunk, const BlockRegistry& blocks) {
         int z = key / (CHUNK_SIZE * CHUNK_SIZE);
 
         for (int i = 0; i < voxel.objectCount; i++) {
-            uint8_t visible = 0x3F;
+            uint8_t visible = FACE_ALL;
 
             for (int d = 0; d < 6; d++) {
                 int nx = x + dirs[d][0];

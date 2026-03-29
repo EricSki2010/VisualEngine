@@ -37,6 +37,6 @@ static unsigned int cubeIndices[] = {
     20,21,22,22,23,20,
 };
 
-static VE::MeshDef cubeMesh = {
+static VE::MeshDef cubeData_mesh = {
     cubeVertices, 24, cubeIndices, 36, "assets/cube.png"
 };
