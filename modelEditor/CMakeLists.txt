@@ -11,7 +11,7 @@ add_executable(modelEditor
     ../VisualEngine/renderingManagement/Shader.cpp
     ../VisualEngine/renderingManagement/Texture.cpp
     ../VisualEngine/renderingManagement/ChunkMesh.cpp
-    ../VisualEngine/renderingManagement/Highlight.cpp
+    src/Highlight.cpp
     ../VisualEngine/renderingManagement/RenderLoop.cpp
     ../VisualEngine/inputManagement/Camera.cpp
     ../VisualEngine/inputManagement/Collision.cpp

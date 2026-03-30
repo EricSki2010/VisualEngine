@@ -1,5 +1,4 @@
 #include "render.h"
-#include "Highlight.h"
 #include "ChunkMesh.h"
 #include "../EngineGlobals.h"
 #include "../inputManagement/Camera.h"
@@ -31,5 +30,5 @@ void render() {
     for (auto& entry : gMergedMeshes)
         entry.mesh->draw(*gShader);
 
-    renderHoverHighlight();
+    if (gPostRenderCallback) gPostRenderCallback();
 }

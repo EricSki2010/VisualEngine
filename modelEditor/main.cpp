@@ -1,7 +1,10 @@
 #include "../VisualEngine/VisualEngine.h"
+#include "src/Highlight.h"
 
 int main() {
     VE::initWindow(800, 600, "Model Editor");
+    // initHighlight();
+    // VE::setPostRenderCallback(renderHoverHighlight);
     VE::loadMesh("cube", "assets/cube.mesh");
     VE::setMode(VE::SINGLE);
     VE::setCamera(6, 4, 6, 210, -25);
@@ -12,5 +15,6 @@ int main() {
                 VE::draw("cube", x, y, z);
 
     VE::run();
+    // cleanupHighlight();
     return 0;
 }

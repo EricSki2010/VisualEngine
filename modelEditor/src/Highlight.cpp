@@ -1,7 +1,7 @@
 #include "Highlight.h"
-#include "render.h"
-#include "../EngineGlobals.h"
-#include "../inputManagement/Collision.h"
+#include "../../VisualEngine/renderingManagement/render.h"
+#include "../../VisualEngine/EngineGlobals.h"
+#include "../../VisualEngine/inputManagement/Collision.h"
 
 static unsigned int gHighlightVAO = 0;
 static unsigned int gHighlightVBO = 0;

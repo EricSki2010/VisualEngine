@@ -14,3 +14,4 @@ extern int gHeight;
 extern bool gNeedsRebuild;
 extern VE::MeshMode gMode;
 extern std::vector<MergedMeshEntry> gMergedMeshes;
+extern void (*gPostRenderCallback)();

@@ -1,7 +1,6 @@
 #include "VisualEngine.h"
 #include "EngineGlobals.h"
 #include "renderingManagement/DefaultShaders.h"
-#include "renderingManagement/Highlight.h"
 #include "renderingManagement/RenderLoop.h"
 #include "inputManagement/Camera.h"
 #include "inputManagement/Collision.h"
@@ -15,6 +14,7 @@ int gHeight = 600;
 bool gNeedsRebuild = true;
 VE::MeshMode gMode = VE::SINGLE;
 std::vector<MergedMeshEntry> gMergedMeshes;
+void (*gPostRenderCallback)() = nullptr;
 
 static void framebufferSizeCallback(GLFWwindow*, int width, int height) {
     glViewport(0, 0, width, height);
@@ -59,8 +59,6 @@ bool initWindow(int width, int height, const char* title) {
 
     gShader = std::make_unique<Shader>(defaultVertSrc, defaultFragSrc);
     gScene = std::make_unique<Scene>((float)gWidth / (float)gHeight);
-
-    initHighlight();
 
     return true;
 }
@@ -121,6 +119,10 @@ void rebuild() {
     gNeedsRebuild = false;
 }
 
+void setPostRenderCallback(void (*callback)()) {
+    gPostRenderCallback = callback;
+}
+
 void run() {
     if (!gWindow || !gShader || !gScene) return;
 
@@ -143,7 +145,6 @@ void run() {
     }
 
     gMergedMeshes.clear();
-    cleanupHighlight();
     gScene.reset();
     gShader.reset();
     glfwTerminate();
