@@ -1,8 +1,10 @@
 #include "ChunkMesh.h"
+#include "../inputManagement/Collision.h"
 #include <unordered_set>
 #include <fstream>
 #include <iostream>
 #include <cmath>
+#include <algorithm>
 
 // ── Mesh registry ───────────────────────────────────────────────────
 
@@ -16,6 +18,7 @@ void registerMesh(const char* name, const VE::MeshDef& def) {
     reg.indices.assign(def.indices, def.indices + def.indexCount);
     reg.indexCount = def.indexCount;
     reg.texture = def.texturePath ? std::make_shared<Texture>(def.texturePath) : nullptr;
+    reg.rectangular = isMeshRectangular(def.vertices, def.vertexCount);
     gMeshes[name] = std::move(reg);
 }
 
@@ -31,6 +34,11 @@ void registerMeshFromFile(const char* name, const char* meshFilePath) {
     file.read(reinterpret_cast<char*>(&indexCount), sizeof(indexCount));
     file.read(reinterpret_cast<char*>(&texturePathLen), sizeof(texturePathLen));
     if (!file) return;
+
+    if (vertexCount > 1000000 || indexCount > 3000000 || texturePathLen > 4096) {
+        std::cerr << "Mesh file has invalid header: " << meshFilePath << std::endl;
+        return;
+    }
 
     RegisteredMesh reg;
     reg.vertexCount = vertexCount;
@@ -48,6 +56,7 @@ void registerMeshFromFile(const char* name, const char* meshFilePath) {
     if (!texPath.empty() && texPath.back() == '\0') texPath.pop_back();
 
     reg.texture = !texPath.empty() ? std::make_shared<Texture>(texPath.c_str()) : nullptr;
+    reg.rectangular = isMeshRectangular(reg.vertices.data(), reg.vertexCount);
     gMeshes[name] = std::move(reg);
 }
 
@@ -55,9 +64,28 @@ void addDrawInstance(const char* meshName, float x, float y, float z) {
     gDrawList.push_back({glm::vec3(x, y, z), meshName});
 }
 
+void removeDrawInstance(float x, float y, float z) {
+    glm::ivec3 target((int)roundf(x), (int)roundf(y), (int)roundf(z));
+    gDrawList.erase(
+        std::remove_if(gDrawList.begin(), gDrawList.end(), [&](const DrawInstance& d) {
+            return glm::ivec3((int)roundf(d.position.x), (int)roundf(d.position.y), (int)roundf(d.position.z)) == target;
+        }),
+        gDrawList.end()
+    );
+}
+
+void clearDrawInstances() {
+    gDrawList.clear();
+}
+
 void clearMeshData() {
     gMeshes.clear();
     gDrawList.clear();
+}
+
+const RegisteredMesh* getRegisteredMesh(const char* name) {
+    auto it = gMeshes.find(name);
+    return (it != gMeshes.end()) ? &it->second : nullptr;
 }
 
 // ── Face culling + mesh merging ─────────────────────────────────────
@@ -85,6 +113,11 @@ static const unsigned int faceIdx[6][6] = {
 };
 
 std::vector<MergedMeshEntry> buildMergedMeshes() {
+    // TODO: chunk-based meshing (not yet implemented)
+    return buildSingleMeshes();
+}
+
+std::vector<MergedMeshEntry> buildSingleMeshes() {
     std::unordered_set<glm::ivec3, IVec3Hash> occupied;
     for (const auto& d : gDrawList)
         occupied.insert(glm::ivec3((int)roundf(d.position.x), (int)roundf(d.position.y), (int)roundf(d.position.z)));

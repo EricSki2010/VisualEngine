@@ -21,6 +21,9 @@ public:
     unsigned int program;
 
     Shader(const char* vertexSrc, const char* fragmentSrc);
+    ~Shader();
+    Shader(const Shader&) = delete;
+    Shader& operator=(const Shader&) = delete;
     void use() const;
     unsigned int getID() const;
     int loc(const char* name);
@@ -46,8 +49,10 @@ public:
     unsigned int id;
 
     Texture(const char* filepath);
+    ~Texture();
+    Texture(const Texture&) = delete;
+    Texture& operator=(const Texture&) = delete;
     void bind(int unit = 0) const;
-    static Texture* loadFromFile(const char* filepath);
 };
 
 class Mesh {
@@ -58,6 +63,9 @@ public:
     glm::vec3 color;
 
     Mesh(float* vertices, int vertexCount, unsigned int* indices, int indexCount);
+    ~Mesh();
+    Mesh(const Mesh&) = delete;
+    Mesh& operator=(const Mesh&) = delete;
     void setTexture(Texture* tex);
     void setColor(glm::vec3 col);
     void draw(Shader& shader);

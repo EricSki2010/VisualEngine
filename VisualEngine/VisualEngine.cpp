@@ -1,16 +1,20 @@
 #include "VisualEngine.h"
-#include "renderingManagement/render.h"
+#include "EngineGlobals.h"
 #include "renderingManagement/DefaultShaders.h"
-#include "renderingManagement/ChunkMesh.h"
+#include "renderingManagement/Highlight.h"
+#include "renderingManagement/RenderLoop.h"
 #include "inputManagement/Camera.h"
+#include "inputManagement/Collision.h"
 #include <iostream>
-#include <memory>
 
-static GLFWwindow* gWindow = nullptr;
-static std::unique_ptr<Shader> gShader;
-static std::unique_ptr<Scene> gScene;
-static int gWidth = 800;
-static int gHeight = 600;
+GLFWwindow* gWindow = nullptr;
+std::unique_ptr<Shader> gShader;
+std::unique_ptr<Scene> gScene;
+int gWidth = 800;
+int gHeight = 600;
+bool gNeedsRebuild = true;
+VE::MeshMode gMode = VE::SINGLE;
+std::vector<MergedMeshEntry> gMergedMeshes;
 
 static void framebufferSizeCallback(GLFWwindow*, int width, int height) {
     glViewport(0, 0, width, height);
@@ -56,6 +60,8 @@ bool initWindow(int width, int height, const char* title) {
     gShader = std::make_unique<Shader>(defaultVertSrc, defaultFragSrc);
     gScene = std::make_unique<Scene>((float)gWidth / (float)gHeight);
 
+    initHighlight();
+
     return true;
 }
 
@@ -75,45 +81,69 @@ void loadMesh(const char* name, const char* meshFilePath) {
     registerMeshFromFile(name, meshFilePath);
 }
 
+void setMode(MeshMode mode) {
+    gMode = mode;
+    gNeedsRebuild = true;
+}
+
 void draw(const char* meshName, float x, float y, float z) {
     addDrawInstance(meshName, x, y, z);
+    const RegisteredMesh* reg = getRegisteredMesh(meshName);
+    if (reg)
+        addCollider(meshName, reg->vertices.data(), reg->vertexCount,
+                    reg->indices.data(), reg->indexCount, reg->rectangular, x, y, z);
+    gNeedsRebuild = true;
+}
+
+void undraw(float x, float y, float z) {
+    removeDrawInstance(x, y, z);
+    removeCollider(x, y, z);
+    gNeedsRebuild = true;
+}
+
+void clearDraws() {
+    clearDrawInstances();
+    clearColliders();
+    gNeedsRebuild = true;
+}
+
+bool hasBlockAt(int x, int y, int z) {
+    return hasColliderAt(x, y, z);
+}
+
+void rebuild() {
+    gMergedMeshes.clear();
+    if (gMode == CHUNK) {
+        gMergedMeshes = buildMergedMeshes();
+    } else {
+        gMergedMeshes = buildSingleMeshes();
+    }
+    gNeedsRebuild = false;
 }
 
 void run() {
     if (!gWindow || !gShader || !gScene) return;
 
-    Camera* cam = getGlobalCamera();
-    auto meshes = buildMergedMeshes();
-
-    glm::mat4 model(1.0f);
     gScene->uploadStaticUniforms(*gShader);
     double lastTime = glfwGetTime();
+
+    rebuild();
 
     while (!glfwWindowShouldClose(gWindow)) {
         double now = glfwGetTime();
         float dt = (float)(now - lastTime);
         lastTime = now;
 
-        if (glfwGetKey(gWindow, GLFW_KEY_ESCAPE) == GLFW_PRESS)
-            glfwSetWindowShouldClose(gWindow, true);
-
-        cam->processKeyboard(gWindow, dt);
-        gScene->view = cam->getViewMatrix();
-        glUniformMatrix4fv(gShader->loc("view"), 1, GL_FALSE, glm::value_ptr(gScene->view));
-        glUniform3fv(gShader->loc("viewPos"), 1, glm::value_ptr(cam->position));
-
-        glClearColor(0.1f, 0.1f, 0.12f, 1.0f);
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
-        gScene->uploadFrameUniforms(*gShader, model);
-        for (auto& entry : meshes)
-            entry.mesh->draw(*gShader);
+        processInput(dt);
+        update();
+        render();
 
         glfwSwapBuffers(gWindow);
         glfwPollEvents();
     }
 
-    meshes.clear();
+    gMergedMeshes.clear();
+    cleanupHighlight();
     gScene.reset();
     gShader.reset();
     glfwTerminate();

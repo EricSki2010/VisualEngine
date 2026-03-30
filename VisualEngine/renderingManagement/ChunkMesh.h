@@ -13,6 +13,7 @@ struct RegisteredMesh {
     std::vector<unsigned int> indices;
     int indexCount;
     std::shared_ptr<Texture> texture;
+    bool rectangular;
 };
 
 struct DrawInstance {
@@ -28,5 +29,9 @@ struct MergedMeshEntry {
 void registerMesh(const char* name, const VE::MeshDef& def);
 void registerMeshFromFile(const char* name, const char* meshFilePath);
 void addDrawInstance(const char* meshName, float x, float y, float z);
-std::vector<MergedMeshEntry> buildMergedMeshes();
+void removeDrawInstance(float x, float y, float z);
+void clearDrawInstances();
+std::vector<MergedMeshEntry> buildMergedMeshes();  // CHUNK mode: face culling + merge
+std::vector<MergedMeshEntry> buildSingleMeshes();  // SINGLE mode: full meshes, no culling
 void clearMeshData();
+const RegisteredMesh* getRegisteredMesh(const char* name);

@@ -3,6 +3,7 @@
 int main() {
     VE::initWindow(800, 600, "Model Editor");
     VE::loadMesh("cube", "assets/cube.mesh");
+    VE::setMode(VE::SINGLE);
     VE::setCamera(6, 4, 6, 210, -25);
 
     for (int x = 0; x < 3; x++)

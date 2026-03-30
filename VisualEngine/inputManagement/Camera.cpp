@@ -18,6 +18,23 @@ void Camera::updateDir() {
 }
 
 void Camera::processKeyboard(GLFWwindow* window, float dt) {
+    // Q toggle — checked every frame, instant response
+    bool qDown = glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS;
+    if (qDown && !qWasPressed) {
+        looking = !looking;
+        if (looking) {
+            glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+            int w, h;
+            glfwGetWindowSize(window, &w, &h);
+            glfwSetCursorPos(window, w / 2.0, h / 2.0);
+            lastMouseX = w / 2.0;
+            lastMouseY = h / 2.0;
+        } else {
+            glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+        }
+    }
+    qWasPressed = qDown;
+
     float yawRad = glm::radians(yaw);
     glm::vec3 forward(sin(yawRad), 0.0f, cos(yawRad));
     glm::vec3 right(-cos(yawRad), 0.0f, sin(yawRad));
@@ -39,25 +56,12 @@ glm::mat4 Camera::getViewMatrix() const {
 
 void Camera::mouseCallback(GLFWwindow* window, double xpos, double ypos) {
     Camera* cam = getGlobalCamera();
-    bool qDown = glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS;
 
-    // Toggle on Q press (not hold)
-    if (qDown && !cam->qWasPressed) {
-        cam->looking = !cam->looking;
-        if (cam->looking) {
-            glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
-            int w, h;
-            glfwGetWindowSize(window, &w, &h);
-            glfwSetCursorPos(window, w / 2.0, h / 2.0);
-            cam->lastMouseX = w / 2.0;
-            cam->lastMouseY = h / 2.0;
-        } else {
-            glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
-        }
+    if (!cam->looking) {
+        cam->lastMouseX = xpos;
+        cam->lastMouseY = ypos;
+        return;
     }
-    cam->qWasPressed = qDown;
-
-    if (!cam->looking) return;
 
     float dx = (float)(cam->lastMouseX - xpos);
     float dy = (float)(cam->lastMouseY - ypos);

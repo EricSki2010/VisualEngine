@@ -26,11 +26,11 @@ Texture::Texture(const char* filepath) {
     stbi_image_free(data);
 }
 
+Texture::~Texture() {
+    glDeleteTextures(1, &id);
+}
+
 void Texture::bind(int unit) const {
     glActiveTexture(GL_TEXTURE0 + unit);
     glBindTexture(GL_TEXTURE_2D, id);
-}
-
-Texture* Texture::loadFromFile(const char* filepath) {
-    return new Texture(filepath);
 }

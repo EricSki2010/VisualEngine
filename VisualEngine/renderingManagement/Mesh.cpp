@@ -85,6 +85,12 @@ Mesh::Mesh(float* vertices, int vertCount, unsigned int* indices, int idxCount) 
     delete[] buffer;
 }
 
+Mesh::~Mesh() {
+    glDeleteVertexArrays(1, &VAO);
+    glDeleteBuffers(1, &VBO);
+    glDeleteBuffers(1, &EBO);
+}
+
 void Mesh::setTexture(Texture* tex) {
     texture = tex;
 }
@@ -94,6 +100,8 @@ void Mesh::setColor(glm::vec3 col) {
 }
 
 void Mesh::draw(Shader& shader) {
+    glUniform1f(shader.loc("alpha"), 1.0f);
+
     if (texture) {
         texture->bind(0);
         glUniform1i(shader.loc("textureSampler"), 0);

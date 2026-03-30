@@ -1,7 +1,7 @@
 #include "render.h"
 
 Scene::Scene(float aspectRatio) {
-    projection = glm::perspective(glm::radians(45.0f), aspectRatio, 0.1f, 100.0f);
+    projection = glm::perspective(glm::radians(45.0f), aspectRatio, 0.1f, 500.0f);
     view = glm::mat4(1.0f);
 
     light.position = glm::vec3(40.0f, 60.0f, 30.0f);
