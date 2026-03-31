@@ -3,8 +3,8 @@
 
 int main() {
     VE::initWindow(800, 600, "Model Editor");
-    // initHighlight();
-    // VE::setPostRenderCallback(renderHoverHighlight);
+    initHighlight();
+    VE::setPostRenderCallback(renderHoverHighlight);
     VE::loadMesh("cube", "assets/cube.mesh");
     VE::setMode(VE::SINGLE);
     VE::setCamera(6, 4, 6, 210, -25);
@@ -13,8 +13,8 @@ int main() {
         for (int y = 0; y < 3; y++)
             for (int z = 0; z < 3; z++)
                 VE::draw("cube", x, y, z);
-
+    VE::undraw(0, 0, 0);
     VE::run();
-    // cleanupHighlight();
+    cleanupHighlight();
     return 0;
 }

@@ -11,10 +11,13 @@ add_executable(modelEditor
     ../VisualEngine/renderingManagement/Shader.cpp
     ../VisualEngine/renderingManagement/Texture.cpp
     ../VisualEngine/renderingManagement/ChunkMesh.cpp
-    src/Highlight.cpp
+    ../VisualEngine/renderingManagement/Overlay.cpp
     ../VisualEngine/renderingManagement/RenderLoop.cpp
     ../VisualEngine/inputManagement/Camera.cpp
     ../VisualEngine/inputManagement/Collision.cpp
+    ../VisualEngine/inputManagement/Raycasting.cpp
+    src/Highlight.cpp
+    src/Selection.cpp
     E:/glad/src/glad.c
 )
 

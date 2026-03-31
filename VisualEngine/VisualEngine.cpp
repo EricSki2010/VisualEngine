@@ -6,48 +6,40 @@
 #include "inputManagement/Collision.h"
 #include <iostream>
 
-GLFWwindow* gWindow = nullptr;
-std::unique_ptr<Shader> gShader;
-std::unique_ptr<Scene> gScene;
-int gWidth = 800;
-int gHeight = 600;
-bool gNeedsRebuild = true;
-VE::MeshMode gMode = VE::SINGLE;
-std::vector<MergedMeshEntry> gMergedMeshes;
-void (*gPostRenderCallback)() = nullptr;
+EngineContext ctx;
 
 static void framebufferSizeCallback(GLFWwindow*, int width, int height) {
     glViewport(0, 0, width, height);
-    gWidth = width;
-    gHeight = height;
-    if (gScene)
-        gScene->projection = glm::perspective(glm::radians(45.0f), (float)width / (float)height, 0.1f, 500.0f);
+    ctx.width = width;
+    ctx.height = height;
+    if (ctx.scene)
+        ctx.scene->projection = glm::perspective(glm::radians(45.0f), (float)width / (float)height, 0.1f, 500.0f);
 }
 
 namespace VE {
 
 bool initWindow(int width, int height, const char* title) {
-    gWidth = width;
-    gHeight = height;
+    ctx.width = width;
+    ctx.height = height;
 
     glfwInit();
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 
-    gWindow = glfwCreateWindow(width, height, title, nullptr, nullptr);
-    if (!gWindow) {
+    ctx.window = glfwCreateWindow(width, height, title, nullptr, nullptr);
+    if (!ctx.window) {
         std::cerr << "Failed to create GLFW window" << std::endl;
         glfwTerminate();
         return false;
     }
-    glfwMakeContextCurrent(gWindow);
-    glfwMaximizeWindow(gWindow);
-    glfwGetFramebufferSize(gWindow, &gWidth, &gHeight);
+    glfwMakeContextCurrent(ctx.window);
+    glfwMaximizeWindow(ctx.window);
+    glfwGetFramebufferSize(ctx.window, &ctx.width, &ctx.height);
 
-    glfwSetFramebufferSizeCallback(gWindow, framebufferSizeCallback);
-    glfwSetCursorPosCallback(gWindow, Camera::mouseCallback);
-    glfwSetInputMode(gWindow, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+    glfwSetFramebufferSizeCallback(ctx.window, framebufferSizeCallback);
+    glfwSetCursorPosCallback(ctx.window, Camera::mouseCallback);
+    glfwSetInputMode(ctx.window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
 
     if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress)) {
         std::cerr << "Failed to initialize GLAD" << std::endl;
@@ -55,10 +47,10 @@ bool initWindow(int width, int height, const char* title) {
     }
 
     glEnable(GL_DEPTH_TEST);
-    glViewport(0, 0, gWidth, gHeight);
+    glViewport(0, 0, ctx.width, ctx.height);
 
-    gShader = std::make_unique<Shader>(defaultVertSrc, defaultFragSrc);
-    gScene = std::make_unique<Scene>((float)gWidth / (float)gHeight);
+    ctx.shader = std::make_unique<Shader>(defaultVertSrc, defaultFragSrc);
+    ctx.scene = std::make_unique<Scene>((float)ctx.width / (float)ctx.height);
 
     return true;
 }
@@ -80,8 +72,8 @@ void loadMesh(const char* name, const char* meshFilePath) {
 }
 
 void setMode(MeshMode mode) {
-    gMode = mode;
-    gNeedsRebuild = true;
+    ctx.mode = mode;
+    ctx.needsRebuild = true;
 }
 
 void draw(const char* meshName, float x, float y, float z) {
@@ -90,19 +82,19 @@ void draw(const char* meshName, float x, float y, float z) {
     if (reg)
         addCollider(meshName, reg->vertices.data(), reg->vertexCount,
                     reg->indices.data(), reg->indexCount, reg->rectangular, x, y, z);
-    gNeedsRebuild = true;
+    ctx.needsRebuild = true;
 }
 
 void undraw(float x, float y, float z) {
     removeDrawInstance(x, y, z);
     removeCollider(x, y, z);
-    gNeedsRebuild = true;
+    ctx.needsRebuild = true;
 }
 
 void clearDraws() {
     clearDrawInstances();
     clearColliders();
-    gNeedsRebuild = true;
+    ctx.needsRebuild = true;
 }
 
 bool hasBlockAt(int x, int y, int z) {
@@ -110,28 +102,28 @@ bool hasBlockAt(int x, int y, int z) {
 }
 
 void rebuild() {
-    gMergedMeshes.clear();
-    if (gMode == CHUNK) {
-        gMergedMeshes = buildMergedMeshes();
+    ctx.mergedMeshes.clear();
+    if (ctx.mode == CHUNK) {
+        ctx.mergedMeshes = buildMergedMeshes();
     } else {
-        gMergedMeshes = buildSingleMeshes();
+        ctx.mergedMeshes = buildSingleMeshes();
     }
-    gNeedsRebuild = false;
+    ctx.needsRebuild = false;
 }
 
-void setPostRenderCallback(void (*callback)()) {
-    gPostRenderCallback = callback;
+void setPostRenderCallback(std::function<void()> callback) {
+    ctx.postRenderCallback = std::move(callback);
 }
 
 void run() {
-    if (!gWindow || !gShader || !gScene) return;
+    if (!ctx.window || !ctx.shader || !ctx.scene) return;
 
-    gScene->uploadStaticUniforms(*gShader);
+    ctx.scene->uploadStaticUniforms(*ctx.shader);
     double lastTime = glfwGetTime();
 
     rebuild();
 
-    while (!glfwWindowShouldClose(gWindow)) {
+    while (!glfwWindowShouldClose(ctx.window)) {
         double now = glfwGetTime();
         float dt = (float)(now - lastTime);
         lastTime = now;
@@ -140,16 +132,16 @@ void run() {
         update();
         render();
 
-        glfwSwapBuffers(gWindow);
+        glfwSwapBuffers(ctx.window);
         glfwPollEvents();
     }
 
-    gMergedMeshes.clear();
-    gScene.reset();
-    gShader.reset();
+    ctx.mergedMeshes.clear();
+    ctx.scene.reset();
+    ctx.shader.reset();
     glfwTerminate();
 
-    gWindow = nullptr;
+    ctx.window = nullptr;
     clearMeshData();
 }
 

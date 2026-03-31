@@ -1,5 +1,7 @@
 #pragma once
 
+#include <functional>
+
 namespace VE {
 
 enum MeshMode {
@@ -26,7 +28,7 @@ void undraw(float x, float y, float z);
 void clearDraws();
 void rebuild();
 bool hasBlockAt(int x, int y, int z);
-void setPostRenderCallback(void (*callback)());
+void setPostRenderCallback(std::function<void()> callback);
 void run();
 
 } // namespace VE

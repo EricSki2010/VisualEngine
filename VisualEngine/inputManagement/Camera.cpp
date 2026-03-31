@@ -39,13 +39,15 @@ void Camera::processKeyboard(GLFWwindow* window, float dt) {
     glm::vec3 forward(sin(yawRad), 0.0f, cos(yawRad));
     glm::vec3 right(-cos(yawRad), 0.0f, sin(yawRad));
 
-    float speed = moveSpeed * dt;
-    if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) position += forward * speed;
-    if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) position -= forward * speed;
-    if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) position += right * speed;
-    if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) position -= right * speed;
-    if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS) position.y += speed;
-    if (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS) position.y -= speed;
+    if (looking) {
+        float speed = moveSpeed * dt;
+        if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) position += forward * speed;
+        if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) position -= forward * speed;
+        if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) position += right * speed;
+        if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) position -= right * speed;
+        if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS) position.y += speed;
+        if (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS) position.y -= speed;
+    }
 
     updateDir();
 }
