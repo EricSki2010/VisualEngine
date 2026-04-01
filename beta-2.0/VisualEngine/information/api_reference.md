@@ -4,8 +4,8 @@
 **Header:** `VisualEngine/VisualEngine.h`
 **Implementation:** `VisualEngine/VisualEngine.cpp`
 
-`VE::initWindow(width, height, title) -> bool`
-  Creates a window with OpenGL 3.3 context. Initializes shader, scene, and input.
+`VE::initWindow(width, height, title, maximized = false) -> bool`
+  Creates a window with OpenGL 3.3 context. Initializes shader, scene, and input. Pass `true` for maximized to fill the screen.
 
 `VE::setCamera(x, y, z, yaw, pitch)`
   Sets camera position and orientation.
@@ -34,11 +34,17 @@
 `VE::rebuild()`
   Forces a mesh rebuild. Normally happens automatically when needsRebuild is set.
 
-`VE::setPostRenderCallback(std::function<void()>)`
-  Registers a function called every frame after scene rendering. Used by apps to inject custom rendering (e.g. highlights, overlays, debug drawing).
+`VE::loadMeshDir(dirPath)`
+  Scans a directory for all `.mesh` files and registers each one. The filename (without extension) becomes the mesh name.
+
+`VE::registerScene(name, onEnter, onExit, onInput, onUpdate, onRender)`
+  Registers a named scene with lifecycle hooks. See Scene Management section.
+
+`VE::setScene(name)`
+  Switches to a registered scene.
 
 `VE::run()`
-  Starts the main loop: processInput -> update -> render -> swap. Blocks until window closes. Cleans up on exit.
+  Starts the main loop: processInput -> update -> render -> swap. Blocks until window closes. Calls active scene's onExit before cleanup.
 
 
 ## ENGINE CONTEXT
@@ -215,4 +221,49 @@
   Triggers rebuild if needed. Updates view matrix from camera.
 
 `render()`
-  Clears screen, uploads uniforms, draws all meshes, calls postRenderCallback if set.
+  Clears screen, uploads uniforms, draws all meshes, calls active scene's onRender if set.
+
+
+## SCENE MANAGEMENT
+**Header:** `VisualEngine/sceneManagement/SceneManager.h`
+**Implementation:** `VisualEngine/sceneManagement/SceneManager.cpp`
+
+`SceneDef { onEnter, onExit, onInput, onUpdate, onRender }`
+  Defines a scene's lifecycle hooks. All are optional (nullable).
+
+`VE::registerScene(name, onEnter, onExit, onInput, onUpdate, onRender)`
+  Registers a named scene with its hooks. Nothing runs until setScene is called.
+
+`VE::setScene(name)`
+  Switches to a scene. Calls onExit on the current scene, then onEnter on the new one.
+
+`getActiveScene() -> SceneDef*`
+  Returns the currently active scene definition, or nullptr.
+
+`getActiveSceneName() -> string&`
+  Returns the name of the currently active scene.
+
+
+## MEMORY MANAGEMENT
+**Header:** `VisualEngine/memoryManagement/memory.h`
+**Implementation:** `VisualEngine/memoryManagement/memory.cpp`
+
+`setMemoryPath(dir)`
+  Sets the base directory for saving/loading binary files.
+
+`saveToMemory(name, formatPath, data) -> bool`
+  Packs a vector of comma-separated strings into a compact binary file using a format definition. Each entry is bit-packed into a uint32 then RLE compressed. Saves to `{memoryPath}/{name}.bin`.
+
+`loadFromMemory(name, formatPath) -> vector<string>`
+  Reads a `.bin` file, RLE decompresses, unpacks each entry, and returns comma-separated strings matching the original data.
+
+Format files define the bit layout per entry, one field per line:
+```
+x -> 4
+y -> 4
+z -> 4
+id -> 10
+rx -> 3
+ry -> 3
+rz -> 3
+```
