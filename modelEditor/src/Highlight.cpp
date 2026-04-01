@@ -5,12 +5,17 @@
 #include "../../VisualEngine/inputManagement/Collision.h"
 #include "../../VisualEngine/renderingManagement/Overlay.h"
 #include "../../VisualEngine/VisualEngine.h"
+#include "../../VisualEngine/inputManagement/Camera.h"
 #include <algorithm>
 #include <cmath>
 
 // Drag state
 static bool sDragging = false;
 static bool sWasRightDown = false;
+static bool sWasTabDown = false;
+static bool sWasDDown = false;
+static bool sWasADown = false;
+static bool sBlockSelectMode = false;
 static glm::ivec3 sStartBlock;
 static int sStartFace = -1;
 
@@ -42,6 +47,15 @@ static void drawFaceOverlay(const glm::ivec3& blockPos, int faceIndex,
     Triangle t1 = aabbFaceTriangle(col->bounds, faceIndex, 1);
     drawTriangleOverlay(*ctx.shader, t0, color, alpha);
     drawTriangleOverlay(*ctx.shader, t1, color, alpha);
+}
+
+static void drawBlockHighlight(const glm::ivec3& pos, const glm::vec3& color, float alpha) {
+    for (int face = 0; face < 6; face++) {
+        glm::ivec3 n = sFaceNormals[face];
+        if (VE::hasBlockAt(pos.x + n.x, pos.y + n.y, pos.z + n.z))
+            continue;
+        drawFaceOverlay(pos, face, color, alpha);
+    }
 }
 
 // Collect all valid faces in the rectangle between start and end block on the locked plane
@@ -84,6 +98,28 @@ void cleanupHighlight() {
 }
 
 void renderHoverHighlight() {
+    // Always draw stored selection, even in movement mode
+    if (sBlockSelectMode) {
+        glm::vec3 purple(0.6f, 0.2f, 1.0f);
+        std::vector<glm::ivec3> drawnBlocks;
+        for (const auto& sel : getSelection()) {
+            bool already = false;
+            for (const auto& b : drawnBlocks)
+                if (b == sel.blockPos) { already = true; break; }
+            if (already) continue;
+            drawnBlocks.push_back(sel.blockPos);
+            drawBlockHighlight(sel.blockPos, purple, 0.45f);
+        }
+    } else {
+        glm::vec3 blue(0.0f, 0.5f, 1.0f);
+        for (const auto& sel : getSelection())
+            drawFaceOverlay(sel.blockPos, sel.faceIndex, blue, 0.45f);
+    }
+
+    // No interaction in movement mode
+    if (getGlobalCamera()->looking)
+        return;
+
     double mx, my;
     glfwGetCursorPos(ctx.window, &mx, &my);
     if (mx < 0 || mx >= ctx.width || my < 0 || my >= ctx.height)
@@ -99,6 +135,57 @@ void renderHoverHighlight() {
 
     bool shiftHeld = glfwGetKey(ctx.window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS;
     bool ctrlHeld = glfwGetKey(ctx.window, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS;
+
+    // Tab toggles block select mode (only when there's a selection)
+    bool tabDown = glfwGetKey(ctx.window, GLFW_KEY_TAB) == GLFW_PRESS;
+    if (tabDown && !sWasTabDown && !getSelection().empty())
+        sBlockSelectMode = !sBlockSelectMode;
+    sWasTabDown = tabDown;
+
+    // Exit block select mode if selection is cleared
+    if (getSelection().empty())
+        sBlockSelectMode = false;
+
+    // Ctrl+D deletes selected blocks
+    bool dDown = glfwGetKey(ctx.window, GLFW_KEY_D) == GLFW_PRESS;
+    if (dDown && !sWasDDown && ctrlHeld && !getSelection().empty()) {
+        std::vector<glm::ivec3> blocks;
+        for (const auto& sel : getSelection()) {
+            bool already = false;
+            for (const auto& b : blocks)
+                if (b == sel.blockPos) { already = true; break; }
+            if (!already) blocks.push_back(sel.blockPos);
+        }
+        clearSelection();
+        sBlockSelectMode = false;
+        for (const auto& pos : blocks)
+            VE::undraw((float)pos.x, (float)pos.y, (float)pos.z);
+    }
+    sWasDDown = dDown;
+
+    // Ctrl+A extrudes blocks from selected faces
+    bool aDown = glfwGetKey(ctx.window, GLFW_KEY_A) == GLFW_PRESS;
+    if (aDown && !sWasADown && ctrlHeld && !getSelection().empty() && !rightDown) {
+        std::vector<SelectedFace> newFaces;
+        for (const auto& sel : getSelection()) {
+            glm::ivec3 n = sFaceNormals[sel.faceIndex];
+            glm::ivec3 newPos = sel.blockPos + n;
+
+            if (VE::hasBlockAt(newPos.x, newPos.y, newPos.z))
+                continue;
+
+            const BlockCollider* col = getColliderAt(sel.blockPos.x, sel.blockPos.y, sel.blockPos.z);
+            if (!col) continue;
+
+            VE::draw(col->meshName.c_str(), (float)newPos.x, (float)newPos.y, (float)newPos.z);
+            newFaces.push_back({newPos, sel.faceIndex});
+        }
+        // Move selection to the new layer's outward faces
+        clearSelection();
+        for (const auto& f : newFaces)
+            addSelectedFace(f.blockPos, f.faceIndex);
+    }
+    sWasADown = aDown;
 
     // Start drag
     if (rightJustPressed && hit.hit && hit.collider && hit.collider->isRectangular) {
@@ -126,11 +213,6 @@ void renderHoverHighlight() {
         sDragging = false;
     }
 
-    // Draw stored selection (blue)
-    glm::vec3 blue(0.0f, 0.5f, 1.0f);
-    for (const auto& sel : getSelection())
-        drawFaceOverlay(sel.blockPos, sel.faceIndex, blue, 0.45f);
-
     // Draw drag preview while dragging (light blue = add, red = remove)
     if (sDragging && hit.hit && hit.collider && hit.collider->isRectangular) {
         glm::ivec3 currentBlock = glm::ivec3(glm::round(hit.collider->position));
@@ -142,10 +224,6 @@ void renderHoverHighlight() {
             drawFaceOverlay(f.blockPos, f.faceIndex, previewColor, 0.35f);
         return;
     }
-
-    // Normal hover highlight (yellow) — skip if there's an active selection
-    if (!getSelection().empty())
-        return;
 
     if (!hit.hit || hit.triangleIndex < 0 || !hit.collider)
         return;

@@ -42,6 +42,8 @@ void drawTriangleOverlay(Shader& shader, const Triangle& tri, const glm::vec3& c
 
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glEnable(GL_POLYGON_OFFSET_FILL);
+    glPolygonOffset(-1.0f, -1.0f);
     glDepthFunc(GL_LEQUAL);
 
     glUniform1i(shader.loc("useTexture"), 0);
@@ -53,6 +55,7 @@ void drawTriangleOverlay(Shader& shader, const Triangle& tri, const glm::vec3& c
 
     glUniform1f(shader.loc("alpha"), 1.0f);
     glDepthFunc(GL_LESS);
+    glDisable(GL_POLYGON_OFFSET_FILL);
     glDisable(GL_BLEND);
 }
 
