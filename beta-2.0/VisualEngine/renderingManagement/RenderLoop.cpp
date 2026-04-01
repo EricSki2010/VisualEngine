@@ -1,6 +1,7 @@
 #include "render.h"
 #include "ChunkMesh.h"
 #include "../EngineGlobals.h"
+#include "../sceneManagement/SceneManager.h"
 #include "../inputManagement/Camera.h"
 
 void processInput(float dt) {
@@ -8,6 +9,10 @@ void processInput(float dt) {
         glfwSetWindowShouldClose(ctx.window, true);
 
     getGlobalCamera()->processKeyboard(ctx.window, dt);
+
+    SceneDef* scene = getActiveScene();
+    if (scene && scene->onInput)
+        scene->onInput(dt);
 }
 
 void update() {
@@ -15,6 +20,10 @@ void update() {
         VE::rebuild();
 
     ctx.scene->view = getGlobalCamera()->getViewMatrix();
+
+    SceneDef* scene = getActiveScene();
+    if (scene && scene->onUpdate)
+        scene->onUpdate();
 }
 
 void render() {
@@ -30,5 +39,7 @@ void render() {
     for (auto& entry : ctx.mergedMeshes)
         entry.mesh->draw(*ctx.shader);
 
-    if (ctx.postRenderCallback) ctx.postRenderCallback();
+    SceneDef* scene = getActiveScene();
+    if (scene && scene->onRender)
+        scene->onRender();
 }

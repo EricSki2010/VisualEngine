@@ -1,10 +1,12 @@
 #include "VisualEngine.h"
 #include "EngineGlobals.h"
+#include "sceneManagement/SceneManager.h"
 #include "renderingManagement/DefaultShaders.h"
 #include "renderingManagement/RenderLoop.h"
 #include "inputManagement/Camera.h"
 #include "inputManagement/Collision.h"
 #include <iostream>
+#include <filesystem>
 
 EngineContext ctx;
 
@@ -18,7 +20,7 @@ static void framebufferSizeCallback(GLFWwindow*, int width, int height) {
 
 namespace VE {
 
-bool initWindow(int width, int height, const char* title) {
+bool initWindow(int width, int height, const char* title, bool maximized) {
     ctx.width = width;
     ctx.height = height;
 
@@ -34,7 +36,8 @@ bool initWindow(int width, int height, const char* title) {
         return false;
     }
     glfwMakeContextCurrent(ctx.window);
-    glfwMaximizeWindow(ctx.window);
+    if (maximized)
+        glfwMaximizeWindow(ctx.window);
     glfwGetFramebufferSize(ctx.window, &ctx.width, &ctx.height);
 
     glfwSetFramebufferSizeCallback(ctx.window, framebufferSizeCallback);
@@ -69,6 +72,19 @@ void loadMesh(const char* name, const MeshDef& def) {
 
 void loadMesh(const char* name, const char* meshFilePath) {
     registerMeshFromFile(name, meshFilePath);
+}
+
+void loadMeshDir(const char* dirPath) {
+    if (!std::filesystem::exists(dirPath)) {
+        std::cerr << "loadMeshDir: directory not found: " << dirPath << std::endl;
+        return;
+    }
+    for (const auto& entry : std::filesystem::directory_iterator(dirPath)) {
+        if (entry.path().extension() == ".mesh") {
+            std::string name = entry.path().stem().string();
+            registerMeshFromFile(name.c_str(), entry.path().string().c_str());
+        }
+    }
 }
 
 void setMode(MeshMode mode) {
@@ -111,8 +127,22 @@ void rebuild() {
     ctx.needsRebuild = false;
 }
 
-void setPostRenderCallback(std::function<void()> callback) {
-    ctx.postRenderCallback = std::move(callback);
+void registerScene(const std::string& name, std::function<void()> onEnter,
+                   std::function<void()> onExit,
+                   std::function<void(float dt)> onInput,
+                   std::function<void()> onUpdate,
+                   std::function<void()> onRender) {
+    SceneDef def;
+    def.onEnter = std::move(onEnter);
+    def.onExit = std::move(onExit);
+    def.onInput = std::move(onInput);
+    def.onUpdate = std::move(onUpdate);
+    def.onRender = std::move(onRender);
+    ::registerScene(name, def);
+}
+
+void setScene(const std::string& name) {
+    setActiveScene(name);
 }
 
 void run() {
@@ -135,6 +165,11 @@ void run() {
         glfwSwapBuffers(ctx.window);
         glfwPollEvents();
     }
+
+    // Exit active scene before cleanup
+    SceneDef* active = getActiveScene();
+    if (active && active->onExit)
+        active->onExit();
 
     ctx.mergedMeshes.clear();
     ctx.scene.reset();

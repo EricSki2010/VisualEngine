@@ -13,6 +13,7 @@ add_executable(modelEditor
     ../VisualEngine/renderingManagement/ChunkMesh.cpp
     ../VisualEngine/renderingManagement/Overlay.cpp
     ../VisualEngine/renderingManagement/RenderLoop.cpp
+    ../VisualEngine/sceneManagement/SceneManager.cpp
     ../VisualEngine/inputManagement/Camera.cpp
     ../VisualEngine/inputManagement/Collision.cpp
     ../VisualEngine/inputManagement/Raycasting.cpp

@@ -5,8 +5,6 @@
 #include "VisualEngine.h"
 #include <memory>
 #include <vector>
-#include <functional>
-
 struct EngineContext {
     GLFWwindow* window = nullptr;
     std::unique_ptr<Shader> shader;
@@ -16,7 +14,6 @@ struct EngineContext {
     bool needsRebuild = true;
     VE::MeshMode mode = VE::SINGLE;
     std::vector<MergedMeshEntry> mergedMeshes;
-    std::function<void()> postRenderCallback;
 };
 
 extern EngineContext ctx;
