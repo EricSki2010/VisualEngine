@@ -24,6 +24,7 @@ void Scene::uploadStaticUniforms(Shader& shader) const {
     glUniform1f(shader.loc("ambientStrength"), light.ambientStrength);
     glUniform1f(shader.loc("specularStrength"), light.specularStrength);
     glUniform1i(shader.loc("shininess"), light.shininess);
+    glUniform1f(shader.loc("brightness"), 1.0f);
 }
 
 void Scene::uploadFrameUniforms(Shader& shader, const glm::mat4& model) const {

@@ -7,6 +7,15 @@ Camera* getGlobalCamera() {
     return &gCamera;
 }
 
+void Camera::setMode(CameraMode newMode) {
+    mode = newMode;
+    if (mode == CAMERA_FLAT) {
+        looking = false;
+        position = glm::vec3(0.0f, 0.0f, 1.0f);
+        target = glm::vec3(0.0f, 0.0f, 0.0f);
+    }
+}
+
 void Camera::updateDir() {
     float yawRad = glm::radians(yaw);
     float pitchRad = glm::radians(pitch);
@@ -18,6 +27,8 @@ void Camera::updateDir() {
 }
 
 void Camera::processKeyboard(GLFWwindow* window, float dt) {
+    if (mode == CAMERA_FLAT) return;
+
     // Q toggle — checked every frame, instant response
     bool qDown = glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS;
     if (qDown && !qWasPressed) {
@@ -53,13 +64,21 @@ void Camera::processKeyboard(GLFWwindow* window, float dt) {
 }
 
 glm::mat4 Camera::getViewMatrix() const {
+    if (mode == CAMERA_FLAT)
+        return glm::mat4(1.0f);
     return glm::lookAt(position, target, glm::vec3(0.0f, 1.0f, 0.0f));
+}
+
+glm::mat4 Camera::getProjectionMatrix(float aspectRatio) const {
+    if (mode == CAMERA_FLAT)
+        return glm::ortho(-aspectRatio, aspectRatio, -1.0f, 1.0f, -1.0f, 1.0f);
+    return glm::perspective(glm::radians(45.0f), aspectRatio, 0.1f, 500.0f);
 }
 
 void Camera::mouseCallback(GLFWwindow* window, double xpos, double ypos) {
     Camera* cam = getGlobalCamera();
 
-    if (!cam->looking) {
+    if (cam->mode == CAMERA_FLAT || !cam->looking) {
         cam->lastMouseX = xpos;
         cam->lastMouseY = ypos;
         return;

@@ -39,6 +39,7 @@ uniform vec3 objectColor;
 uniform sampler2D textureSampler;
 uniform bool useTexture;
 uniform float alpha;
+uniform float brightness;
 
 out vec4 FragColor;
 
@@ -63,6 +64,7 @@ void main() {
     vec3 specular = specularStrength * spec * lightColor;
 
     vec3 result = (ambient + diffuse + specular) * baseColor;
+    result *= brightness;
     FragColor = vec4(result, alpha);
 }
 )";

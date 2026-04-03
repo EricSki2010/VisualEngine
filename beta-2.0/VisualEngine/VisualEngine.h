@@ -30,12 +30,13 @@ void undraw(float x, float y, float z);
 void clearDraws();
 void rebuild();
 bool hasBlockAt(int x, int y, int z);
-void registerScene(const std::string& name, std::function<void()> onEnter,
+void registerScene(const std::string& name, std::function<void(void*)> onEnter,
                    std::function<void()> onExit,
                    std::function<void(float dt)> onInput,
                    std::function<void()> onUpdate,
                    std::function<void()> onRender);
-void setScene(const std::string& name);
+void setScene(const std::string& name, void* data = nullptr);
+void setBrightness(float brightness);
 void run();
 
 } // namespace VE

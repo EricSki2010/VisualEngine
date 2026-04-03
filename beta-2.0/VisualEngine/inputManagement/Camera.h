@@ -5,7 +5,14 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
+enum CameraMode {
+    CAMERA_FPS,
+    CAMERA_FLAT
+};
+
 struct Camera {
+    CameraMode mode = CAMERA_FPS;
+
     glm::vec3 position = glm::vec3(3.0f, 3.0f, 3.0f);
     glm::vec3 target = glm::vec3(0.0f);
     float yaw = 210.0f;
@@ -19,9 +26,11 @@ struct Camera {
     bool looking = false;
     bool qWasPressed = false;
 
+    void setMode(CameraMode newMode);
     void updateDir();
     void processKeyboard(GLFWwindow* window, float dt);
     glm::mat4 getViewMatrix() const;
+    glm::mat4 getProjectionMatrix(float aspectRatio) const;
 
     static void mouseCallback(GLFWwindow* window, double xpos, double ypos);
 };

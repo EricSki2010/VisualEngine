@@ -1,4 +1,5 @@
 #include "memory.h"
+#include "ModelData.h"
 #include <fstream>
 #include <sstream>
 #include <iostream>
@@ -11,7 +12,6 @@ void setMemoryPath(const std::string& dir) {
 }
 
 // Parse a format file into ordered field names and bit widths
-// Format: "fieldName -> bitCount" per line
 static bool parseFormat(const std::string& formatPath,
                         std::vector<std::string>& fieldNames,
                         std::vector<int>& bitWidths) {
@@ -31,7 +31,6 @@ static bool parseFormat(const std::string& formatPath,
         std::string name = line.substr(0, arrow);
         std::string bits = line.substr(arrow + 2);
 
-        // Trim whitespace
         while (!name.empty() && name.back() == ' ') name.pop_back();
         while (!bits.empty() && bits.front() == ' ') bits.erase(bits.begin());
 
@@ -42,66 +41,55 @@ static bool parseFormat(const std::string& formatPath,
     return !fieldNames.empty();
 }
 
+static int totalBits(const std::vector<int>& bitWidths) {
+    int total = 0;
+    for (int w : bitWidths) total += w;
+    return total;
+}
+
 // Parse comma-separated values from a string
-static std::vector<uint32_t> parseValues(const std::string& entry) {
-    std::vector<uint32_t> values;
+static std::vector<uint64_t> parseValues(const std::string& entry) {
+    std::vector<uint64_t> values;
     std::stringstream ss(entry);
     std::string token;
     while (std::getline(ss, token, ',')) {
         while (!token.empty() && token.front() == ' ') token.erase(token.begin());
-        values.push_back((uint32_t)std::stoul(token));
+        values.push_back((uint64_t)std::stoull(token));
     }
     return values;
 }
 
-// Write a value into a bit stream at the given bit offset
-static void writeBits(std::vector<uint8_t>& buffer, int& bitOffset,
-                      uint32_t value, int bitCount) {
-    for (int i = bitCount - 1; i >= 0; i--) {
-        int byteIndex = bitOffset / 8;
-        int bitIndex = 7 - (bitOffset % 8);
-
-        if (byteIndex >= (int)buffer.size())
-            buffer.push_back(0);
-
-        if (value & (1u << i))
-            buffer[byteIndex] |= (1 << bitIndex);
-
-        bitOffset++;
-    }
-}
-
-// Pack a single entry's fields into one uint32_t
-static uint32_t packEntry(const std::vector<uint32_t>& values,
+// Pack a single entry's fields into one uint64_t
+static uint64_t packEntry(const std::vector<uint64_t>& values,
                           const std::vector<int>& bitWidths) {
-    uint32_t packed = 0;
+    uint64_t packed = 0;
     int shift = 0;
     for (int i = (int)values.size() - 1; i >= 0; i--) {
-        packed |= (values[i] & ((1u << bitWidths[i]) - 1)) << shift;
+        packed |= (values[i] & ((1ULL << bitWidths[i]) - 1)) << shift;
         shift += bitWidths[i];
     }
     return packed;
 }
 
-// Unpack a uint32_t back into field values
-static std::vector<uint32_t> unpackEntry(uint32_t packed,
+// Unpack a uint64_t back into field values
+static std::vector<uint64_t> unpackEntry(uint64_t packed,
                                          const std::vector<int>& bitWidths) {
-    std::vector<uint32_t> values(bitWidths.size());
+    std::vector<uint64_t> values(bitWidths.size());
     int shift = 0;
     for (int i = (int)bitWidths.size() - 1; i >= 0; i--) {
-        values[i] = (packed >> shift) & ((1u << bitWidths[i]) - 1);
+        values[i] = (packed >> shift) & ((1ULL << bitWidths[i]) - 1);
         shift += bitWidths[i];
     }
     return values;
 }
 
 // RLE encode: consecutive identical packed values become [value, count] pairs
-static std::vector<uint32_t> rleEncode(const std::vector<uint32_t>& packed) {
-    std::vector<uint32_t> encoded;
+static std::vector<uint64_t> rleEncode(const std::vector<uint64_t>& packed) {
+    std::vector<uint64_t> encoded;
     if (packed.empty()) return encoded;
 
-    uint32_t current = packed[0];
-    uint32_t count = 1;
+    uint64_t current = packed[0];
+    uint64_t count = 1;
     for (size_t i = 1; i < packed.size(); i++) {
         if (packed[i] == current && count < 0xFFFF) {
             count++;
@@ -118,12 +106,12 @@ static std::vector<uint32_t> rleEncode(const std::vector<uint32_t>& packed) {
 }
 
 // RLE decode: expand [value, count] pairs back into flat array
-static std::vector<uint32_t> rleDecode(const std::vector<uint32_t>& encoded) {
-    std::vector<uint32_t> packed;
+static std::vector<uint64_t> rleDecode(const std::vector<uint64_t>& encoded) {
+    std::vector<uint64_t> packed;
     for (size_t i = 0; i + 1 < encoded.size(); i += 2) {
-        uint32_t value = encoded[i];
-        uint32_t count = encoded[i + 1];
-        for (uint32_t c = 0; c < count; c++)
+        uint64_t value = encoded[i];
+        uint64_t count = encoded[i + 1];
+        for (uint64_t c = 0; c < count; c++)
             packed.push_back(value);
     }
     return packed;
@@ -136,10 +124,15 @@ bool saveToMemory(const std::string& name, const std::string& formatPath,
     if (!parseFormat(formatPath, fieldNames, bitWidths))
         return false;
 
-    // Pack each entry into a uint32_t
-    std::vector<uint32_t> packed;
+    // Determine 32 or 64 bit mode
+    bool use64 = totalBits(bitWidths) > 32;
+    uint8_t mode = use64 ? 64 : 32;
+    int unitSize = use64 ? 8 : 4;
+
+    // Pack each entry
+    std::vector<uint64_t> packed;
     for (const auto& entry : data) {
-        std::vector<uint32_t> values = parseValues(entry);
+        std::vector<uint64_t> values = parseValues(entry);
         if (values.size() != bitWidths.size()) {
             std::cerr << "saveToMemory: entry has " << values.size()
                       << " values, format expects " << bitWidths.size() << std::endl;
@@ -149,9 +142,9 @@ bool saveToMemory(const std::string& name, const std::string& formatPath,
     }
 
     // RLE compress
-    std::vector<uint32_t> encoded = rleEncode(packed);
+    std::vector<uint64_t> encoded = rleEncode(packed);
 
-    // Write binary file: [entryCount:32][rleSize:32][rle data...]
+    // Write binary file: [mode:8][entryCount:32][rleSize:32][rle data...]
     std::string path = sMemoryPath + "/" + name + ".bin";
     std::ofstream out(path, std::ios::binary);
     if (!out) {
@@ -161,9 +154,19 @@ bool saveToMemory(const std::string& name, const std::string& formatPath,
 
     uint32_t entryCount = (uint32_t)data.size();
     uint32_t rleSize = (uint32_t)encoded.size();
+    out.write(reinterpret_cast<const char*>(&mode), 1);
     out.write(reinterpret_cast<const char*>(&entryCount), 4);
     out.write(reinterpret_cast<const char*>(&rleSize), 4);
-    out.write(reinterpret_cast<const char*>(encoded.data()), rleSize * 4);
+
+    if (use64) {
+        out.write(reinterpret_cast<const char*>(encoded.data()), rleSize * 8);
+    } else {
+        // Write as 32-bit to save space
+        for (uint64_t v : encoded) {
+            uint32_t v32 = (uint32_t)v;
+            out.write(reinterpret_cast<const char*>(&v32), 4);
+        }
+    }
     return true;
 }
 
@@ -173,7 +176,6 @@ std::vector<std::string> loadFromMemory(const std::string& name, const std::stri
     if (!parseFormat(formatPath, fieldNames, bitWidths))
         return {};
 
-    // Read binary file
     std::string path = sMemoryPath + "/" + name + ".bin";
     std::ifstream in(path, std::ios::binary);
     if (!in) {
@@ -182,21 +184,33 @@ std::vector<std::string> loadFromMemory(const std::string& name, const std::stri
     }
 
     // Read header
+    uint8_t mode = 0;
     uint32_t entryCount = 0, rleSize = 0;
+    in.read(reinterpret_cast<char*>(&mode), 1);
     in.read(reinterpret_cast<char*>(&entryCount), 4);
     in.read(reinterpret_cast<char*>(&rleSize), 4);
 
+    bool use64 = (mode == 64);
+
     // Read RLE data
-    std::vector<uint32_t> encoded(rleSize);
-    in.read(reinterpret_cast<char*>(encoded.data()), rleSize * 4);
+    std::vector<uint64_t> encoded(rleSize);
+    if (use64) {
+        in.read(reinterpret_cast<char*>(encoded.data()), rleSize * 8);
+    } else {
+        for (uint32_t i = 0; i < rleSize; i++) {
+            uint32_t v32 = 0;
+            in.read(reinterpret_cast<char*>(&v32), 4);
+            encoded[i] = v32;
+        }
+    }
 
     // RLE decompress
-    std::vector<uint32_t> packed = rleDecode(encoded);
+    std::vector<uint64_t> packed = rleDecode(encoded);
 
-    // Unpack each entry back to comma-separated string
+    // Unpack each entry
     std::vector<std::string> result;
     for (uint32_t e = 0; e < entryCount && e < packed.size(); e++) {
-        std::vector<uint32_t> values = unpackEntry(packed[e], bitWidths);
+        std::vector<uint64_t> values = unpackEntry(packed[e], bitWidths);
         std::string entry;
         for (size_t i = 0; i < values.size(); i++) {
             if (i > 0) entry += ",";
@@ -206,4 +220,157 @@ std::vector<std::string> loadFromMemory(const std::string& name, const std::stri
     }
 
     return result;
+}
+
+// ── Model save/load ─────────────────────────────────────────────────
+
+static void writeU32(std::ofstream& out, uint32_t v) {
+    out.write(reinterpret_cast<const char*>(&v), 4);
+}
+
+static void writeF32(std::ofstream& out, float v) {
+    out.write(reinterpret_cast<const char*>(&v), 4);
+}
+
+static uint32_t readU32(std::ifstream& in) {
+    uint32_t v = 0;
+    in.read(reinterpret_cast<char*>(&v), 4);
+    return v;
+}
+
+static float readF32(std::ifstream& in) {
+    float v = 0;
+    in.read(reinterpret_cast<char*>(&v), 4);
+    return v;
+}
+
+static void writeString(std::ofstream& out, const std::string& s) {
+    writeU32(out, (uint32_t)s.size());
+    out.write(s.data(), s.size());
+}
+
+static std::string readString(std::ifstream& in) {
+    uint32_t len = readU32(in);
+    if (len > 4096) return "";
+    std::string s(len, '\0');
+    in.read(s.data(), len);
+    return s;
+}
+
+bool saveModel(const std::string& name, const ModelFile& model) {
+    std::string path = sMemoryPath + "/" + name + ".mdl";
+    std::ofstream out(path, std::ios::binary);
+    if (!out) {
+        std::cerr << "saveModel: failed to write: " << path << std::endl;
+        return false;
+    }
+
+    // Magic + version
+    out.write("MDL", 3);
+    uint8_t version = 1;
+    out.write(reinterpret_cast<const char*>(&version), 1);
+
+    // Block types section
+    writeU32(out, (uint32_t)model.blockTypes.size());
+    for (const auto& bt : model.blockTypes) {
+        writeString(out, bt.name);
+        writeU32(out, (uint32_t)bt.vertexCount);
+        writeU32(out, (uint32_t)bt.indexCount);
+
+        // Vertices (position3 + uv2 = 5 floats per vertex)
+        for (float v : bt.vertices) writeF32(out, v);
+
+        // Indices
+        for (unsigned int idx : bt.indices) writeU32(out, idx);
+
+        // Face colors (one per triangle)
+        uint32_t triCount = bt.indexCount / 3;
+        writeU32(out, triCount);
+        for (uint32_t i = 0; i < triCount; i++) {
+            if (i < bt.faceColors.size()) {
+                writeF32(out, bt.faceColors[i].color.r);
+                writeF32(out, bt.faceColors[i].color.g);
+                writeF32(out, bt.faceColors[i].color.b);
+            } else {
+                writeF32(out, 0.8f);
+                writeF32(out, 0.8f);
+                writeF32(out, 0.8f);
+            }
+        }
+    }
+
+    // Placements section
+    writeU32(out, (uint32_t)model.placements.size());
+    for (const auto& p : model.placements) {
+        writeU32(out, (uint32_t)p.x);
+        writeU32(out, (uint32_t)p.y);
+        writeU32(out, (uint32_t)p.z);
+        writeU32(out, (uint32_t)p.typeId);
+        writeU32(out, (uint32_t)p.rx);
+        writeU32(out, (uint32_t)p.ry);
+        writeU32(out, (uint32_t)p.rz);
+    }
+
+    return true;
+}
+
+bool loadModel(const std::string& name, ModelFile& model) {
+    std::string path = sMemoryPath + "/" + name + ".mdl";
+    std::ifstream in(path, std::ios::binary);
+    if (!in) {
+        std::cerr << "loadModel: file not found: " << path << std::endl;
+        return false;
+    }
+
+    // Magic + version
+    char magic[3];
+    in.read(magic, 3);
+    if (magic[0] != 'M' || magic[1] != 'D' || magic[2] != 'L') {
+        std::cerr << "loadModel: invalid file format: " << path << std::endl;
+        return false;
+    }
+    uint8_t version = 0;
+    in.read(reinterpret_cast<char*>(&version), 1);
+
+    // Block types section
+    uint32_t typeCount = readU32(in);
+    model.blockTypes.resize(typeCount);
+    for (uint32_t t = 0; t < typeCount; t++) {
+        BlockTypeDef& bt = model.blockTypes[t];
+        bt.name = readString(in);
+        bt.vertexCount = (int)readU32(in);
+        bt.indexCount = (int)readU32(in);
+
+        bt.vertices.resize(bt.vertexCount * 5);
+        for (int i = 0; i < bt.vertexCount * 5; i++)
+            bt.vertices[i] = readF32(in);
+
+        bt.indices.resize(bt.indexCount);
+        for (int i = 0; i < bt.indexCount; i++)
+            bt.indices[i] = readU32(in);
+
+        uint32_t triCount = readU32(in);
+        bt.faceColors.resize(triCount);
+        for (uint32_t i = 0; i < triCount; i++) {
+            bt.faceColors[i].color.r = readF32(in);
+            bt.faceColors[i].color.g = readF32(in);
+            bt.faceColors[i].color.b = readF32(in);
+        }
+    }
+
+    // Placements section
+    uint32_t placementCount = readU32(in);
+    model.placements.resize(placementCount);
+    for (uint32_t i = 0; i < placementCount; i++) {
+        BlockPlacement& p = model.placements[i];
+        p.x = (int)readU32(in);
+        p.y = (int)readU32(in);
+        p.z = (int)readU32(in);
+        p.typeId = (int)readU32(in);
+        p.rx = (int)readU32(in);
+        p.ry = (int)readU32(in);
+        p.rz = (int)readU32(in);
+    }
+
+    return true;
 }

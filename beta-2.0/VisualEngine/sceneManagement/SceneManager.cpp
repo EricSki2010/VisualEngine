@@ -8,8 +8,7 @@ void registerScene(const std::string& name, const SceneDef& scene) {
     sScenes[name] = scene;
 }
 
-void setActiveScene(const std::string& name) {
-    // Exit current scene
+void setActiveScene(const std::string& name, void* data) {
     if (sActiveScene && sActiveScene->onExit)
         sActiveScene->onExit();
 
@@ -18,7 +17,7 @@ void setActiveScene(const std::string& name) {
         sActiveSceneName = name;
         sActiveScene = &it->second;
         if (sActiveScene->onEnter)
-            sActiveScene->onEnter();
+            sActiveScene->onEnter(data);
     }
 }
 

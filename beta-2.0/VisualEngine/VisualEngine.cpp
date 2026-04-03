@@ -127,7 +127,12 @@ void rebuild() {
     ctx.needsRebuild = false;
 }
 
-void registerScene(const std::string& name, std::function<void()> onEnter,
+void setBrightness(float brightness) {
+    ctx.shader->use();
+    glUniform1f(ctx.shader->loc("brightness"), brightness);
+}
+
+void registerScene(const std::string& name, std::function<void(void*)> onEnter,
                    std::function<void()> onExit,
                    std::function<void(float dt)> onInput,
                    std::function<void()> onUpdate,
@@ -141,8 +146,8 @@ void registerScene(const std::string& name, std::function<void()> onEnter,
     ::registerScene(name, def);
 }
 
-void setScene(const std::string& name) {
-    setActiveScene(name);
+void setScene(const std::string& name, void* data) {
+    setActiveScene(name, data);
 }
 
 void run() {
