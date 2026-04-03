@@ -21,3 +21,6 @@ void renderUI();
 void processUIInput();
 bool handleUIClick(double mouseX, double mouseY, int screenWidth, int screenHeight);
 std::string getInputText(const std::string& groupId, const std::string& elementId);
+bool hasPendingConfirm();
+std::string getPendingConfirmId();
+void cancelPendingConfirm();

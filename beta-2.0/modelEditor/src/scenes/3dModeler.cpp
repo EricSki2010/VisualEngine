@@ -1,5 +1,5 @@
 #include "3dModeler.h"
-#include "../Highlight.h"
+#include "../mechanics/Highlight.h"
 #include "../../../VisualEngine/VisualEngine.h"
 #include "../../../VisualEngine/EngineGlobals.h"
 #include "../../../VisualEngine/inputManagement/Camera.h"
@@ -7,6 +7,7 @@
 #include "../../../VisualEngine/uiManagement/UIRenderer.h"
 #include "../../../VisualEngine/uiManagement/UIPrefabs.h"
 #include "../../../VisualEngine/uiManagement/TextRenderer.h"
+#include "../../../VisualEngine/uiManagement/EmbeddedFont.h"
 #include "../../../VisualEngine/memoryManagement/memory.h"
 #include "../../../VisualEngine/inputManagement/Collision.h"
 #include <cmath>
@@ -90,7 +91,7 @@ void register3dModelerScene() {
             getGlobalCamera()->setMode(CAMERA_FPS);
             initHighlight();
             initUIRenderer();
-            initTextRenderer("assets/arial.ttf", 48);
+            initTextRendererFromMemory(EMBEDDED_FONT_DATA, EMBEDDED_FONT_SIZE, 48);
             VE::setBrightness(1.0f);
             VE::setCamera(6, 4, 6, 210, -25);
 

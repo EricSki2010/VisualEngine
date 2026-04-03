@@ -1,6 +1,7 @@
 #include "UIRenderer.h"
 #include "UIShaders.h"
 #include "../renderingManagement/render.h"
+#include "../EngineGlobals.h"
 
 static unsigned int sUIVAO = 0;
 static unsigned int sUIVBO = 0;
@@ -55,8 +56,13 @@ void drawUIElement(const UIElement& element) {
 
     sUIShader->use();
 
+    float sizeX = element.size.x;
+    if (element.aspectCorrected && ctx.width > 0) {
+        float aspect = (float)ctx.width / (float)ctx.height;
+        sizeX = element.size.x / aspect;
+    }
     glUniform2f(sUIShader->loc("uPosition"), element.position.x, element.position.y);
-    glUniform2f(sUIShader->loc("uSize"), element.size.x, element.size.y);
+    glUniform2f(sUIShader->loc("uSize"), sizeX, element.size.y);
     glUniform4f(sUIShader->loc("uColor"), element.color.r, element.color.g, element.color.b, element.color.a);
 
     bool hasTexture = element.textureId != 0;

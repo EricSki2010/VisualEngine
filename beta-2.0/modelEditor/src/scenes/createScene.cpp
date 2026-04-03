@@ -6,9 +6,10 @@
 #include "../../../VisualEngine/uiManagement/UIRenderer.h"
 #include "../../../VisualEngine/uiManagement/UIPrefabs.h"
 #include "../../../VisualEngine/uiManagement/TextRenderer.h"
+#include "../../../VisualEngine/uiManagement/EmbeddedFont.h"
 #include "../../../VisualEngine/memoryManagement/memory.h"
 #include "../prefabs/templates.h"
-#include <filesystem>
+
 
 static std::string sSelectedType;
 static std::string sSelectedTemplate;
@@ -149,8 +150,19 @@ static void rebuildLayout() {
             UIElement sizeInput = createTextInput("cube_size",
                 BTN_X, y, BTN_W, BTN_H,
                 {0.1f, 0.1f, 0.1f, 0.95f},
-                "Cube size (e.g. 3)", 2);
+                "Cube size (e.g. 3)", 6);
             sizeInput.inputText = sSavedCubeSize;
+            sizeInput.onUnfocus = [](std::string& text) {
+                if (text.empty()) return;
+                try {
+                    int val = std::stoi(text);
+                    if (val < 1) val = 1;
+                    if (val > 64) val = 64;
+                    text = std::to_string(val);
+                } catch (...) {
+                    text = "1";
+                }
+            };
             addToGroup("create_ui", sizeInput);
             y -= GAP;
         }
@@ -164,9 +176,7 @@ static void rebuildLayout() {
                 if (name.empty() || sSelectedType.empty()) return;
 
                 if (sSelectedType == "3D Model") {
-                    std::string savePath = "assets/saves/3dModels";
-                    std::filesystem::create_directories(savePath);
-                    setMemoryPath(savePath);
+                    setMemoryPath("assets/saves/3dModels");
 
                     ModelFile model;
 
@@ -206,7 +216,7 @@ void registerCreateScene() {
             sPickingTemplate = false;
             getGlobalCamera()->setMode(CAMERA_FLAT);
             initUIRenderer();
-            initTextRenderer("assets/arial.ttf", 48);
+            initTextRendererFromMemory(EMBEDDED_FONT_DATA, EMBEDDED_FONT_SIZE, 48);
             rebuildLayout();
         },
         // onExit

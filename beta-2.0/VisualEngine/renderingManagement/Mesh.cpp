@@ -52,7 +52,7 @@ void Mesh::computeNormals(float* vertices, int vertCount, unsigned int* indices,
 Mesh::Mesh(float* vertices, int vertCount, unsigned int* indices, int idxCount) {
     indexCount = idxCount;
     texture = nullptr;
-    color = glm::vec3(0.8f, 0.3f, 0.2f);
+    color = glm::vec3(0.8f);
 
     // build interleaved buffer: pos(3) uv(2) normal(3)
     float* buffer = new float[vertCount * 8];

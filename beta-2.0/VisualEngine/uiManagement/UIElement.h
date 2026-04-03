@@ -22,4 +22,12 @@ struct UIElement {
     std::string inputText;
     std::string placeholder;
     int maxLength = 32;
+    std::function<void(std::string&)> onUnfocus;
+
+    // When true, width is adjusted by aspect ratio so equal w/h values render as a square
+    bool aspectCorrected = false;
+
+    // Confirmation system
+    bool requireConfirm = false;
+    std::string confirmId;
 };

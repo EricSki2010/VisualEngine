@@ -60,7 +60,7 @@ public:
     unsigned int VAO, VBO, EBO;
     int indexCount;
     Texture* texture;
-    glm::vec3 color;
+    glm::vec3 color = glm::vec3(0.8f);
 
     Mesh(float* vertices, int vertexCount, unsigned int* indices, int indexCount);
     ~Mesh();

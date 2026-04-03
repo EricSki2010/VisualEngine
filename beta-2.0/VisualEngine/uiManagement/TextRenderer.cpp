@@ -21,20 +21,7 @@ static unsigned int sTextVAO = 0;
 static unsigned int sTextVBO = 0;
 static Shader* sTextShader = nullptr;
 
-bool initTextRenderer(const char* fontPath, int fontSize) {
-    FT_Library ft;
-    if (FT_Init_FreeType(&ft)) {
-        std::cerr << "FreeType: failed to init library" << std::endl;
-        return false;
-    }
-
-    FT_Face face;
-    if (FT_New_Face(ft, fontPath, 0, &face)) {
-        std::cerr << "FreeType: failed to load font: " << fontPath << std::endl;
-        FT_Done_FreeType(ft);
-        return false;
-    }
-
+static bool loadGlyphs(FT_Face face, int fontSize) {
     FT_Set_Pixel_Sizes(face, 0, fontSize);
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
 
@@ -59,10 +46,10 @@ bool initTextRenderer(const char* fontPath, int fontSize) {
         glyph.advance = (int)face->glyph->advance.x;
         sGlyphs[c] = glyph;
     }
+    return true;
+}
 
-    FT_Done_Face(face);
-    FT_Done_FreeType(ft);
-
+static void initTextGL() {
     sTextShader = new Shader(textVertSrc, textFragSrc);
 
     glGenVertexArrays(1, &sTextVAO);
@@ -73,7 +60,47 @@ bool initTextRenderer(const char* fontPath, int fontSize) {
     glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, 4 * sizeof(float), 0);
     glEnableVertexAttribArray(0);
     glBindVertexArray(0);
+}
 
+bool initTextRenderer(const char* fontPath, int fontSize) {
+    FT_Library ft;
+    if (FT_Init_FreeType(&ft)) {
+        std::cerr << "FreeType: failed to init library" << std::endl;
+        return false;
+    }
+
+    FT_Face face;
+    if (FT_New_Face(ft, fontPath, 0, &face)) {
+        std::cerr << "FreeType: failed to load font: " << fontPath << std::endl;
+        FT_Done_FreeType(ft);
+        return false;
+    }
+
+    loadGlyphs(face, fontSize);
+    FT_Done_Face(face);
+    FT_Done_FreeType(ft);
+    initTextGL();
+    return true;
+}
+
+bool initTextRendererFromMemory(const unsigned char* data, unsigned int dataSize, int fontSize) {
+    FT_Library ft;
+    if (FT_Init_FreeType(&ft)) {
+        std::cerr << "FreeType: failed to init library" << std::endl;
+        return false;
+    }
+
+    FT_Face face;
+    if (FT_New_Memory_Face(ft, data, dataSize, 0, &face)) {
+        std::cerr << "FreeType: failed to load font from memory" << std::endl;
+        FT_Done_FreeType(ft);
+        return false;
+    }
+
+    loadGlyphs(face, fontSize);
+    FT_Done_Face(face);
+    FT_Done_FreeType(ft);
+    initTextGL();
     return true;
 }
 

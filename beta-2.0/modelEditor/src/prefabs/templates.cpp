@@ -3,7 +3,7 @@
 
 ModelFile cubeTemplate(int size) {
     if (size < 1) size = 1;
-    if (size > 16) size = 16;
+    if (size > 64) size = 64;
 
     ModelFile model;
 

@@ -4,6 +4,10 @@ project(modelEditor)
 
 set(CMAKE_CXX_STANDARD 17)
 
+# Enable AddressSanitizer for memory bug detection (disable for release builds)
+add_compile_options(/fsanitize=address /Zi)
+add_link_options(/DEBUG)
+
 add_executable(modelEditor
     main.cpp
     ../VisualEngine/VisualEngine.cpp
@@ -23,9 +27,10 @@ add_executable(modelEditor
     ../VisualEngine/inputManagement/Camera.cpp
     ../VisualEngine/inputManagement/Collision.cpp
     ../VisualEngine/inputManagement/Raycasting.cpp
-    src/Highlight.cpp
-    src/Selection.cpp
-    src/scenes.cpp
+    src/mechanics/Highlight.cpp
+    src/mechanics/Selection.cpp
+    src/mechanics/scenes.cpp
+    src/mechanics/setup.cpp
     src/prefabs/templates.cpp
     src/scenes/3dModeler.cpp
     src/scenes/createScene.cpp

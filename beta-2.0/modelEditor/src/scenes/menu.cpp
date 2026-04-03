@@ -6,6 +6,7 @@
 #include "../../../VisualEngine/uiManagement/UIRenderer.h"
 #include "../../../VisualEngine/uiManagement/UIPrefabs.h"
 #include "../../../VisualEngine/uiManagement/TextRenderer.h"
+#include "../../../VisualEngine/uiManagement/EmbeddedFont.h"
 #include <filesystem>
 
 static bool sLoadView = false;
@@ -106,17 +107,31 @@ static void showFileList(const std::string& type) {
                 std::string name = entry.path().stem().string();
                 std::string btnId = "file_" + name;
 
-                addToGroup("menu_buttons", createButton(btnId,
+                UIElement fileBtn = createButton(btnId,
                     BTN_X, y, BTN_W, BTN_H, BTN_COLOR,
                     name,
                     [name]() {
                         VE::setScene("3dModeler", new std::string(name));
                     }
-                ));
+                );
+                fileBtn.requireConfirm = true;
+                fileBtn.confirmId = "load_file";
+                addToGroup("menu_buttons", fileBtn);
                 y -= GAP;
             }
         }
     }
+
+    // Load button — confirms the file selection
+    UIElement loadBtn = createButton("load_confirm",
+        BTN_X, y, BTN_W, BTN_H,
+        {0.8f, 0.7f, 0.0f, 0.95f},
+        "Load",
+        nullptr
+    );
+    loadBtn.confirmId = "load_file";
+    addToGroup("menu_buttons", loadBtn);
+    y -= GAP;
 
     addToGroup("menu_buttons", createButton("back",
         BTN_X, y, BTN_W, BTN_H,
@@ -133,7 +148,7 @@ void registerMenuScene() {
             sLoadView = false;
             getGlobalCamera()->setMode(CAMERA_FLAT);
             initUIRenderer();
-            initTextRenderer("assets/arial.ttf", 48);
+            initTextRendererFromMemory(EMBEDDED_FONT_DATA, EMBEDDED_FONT_SIZE, 48);
             showMainMenu();
         },
         // onExit

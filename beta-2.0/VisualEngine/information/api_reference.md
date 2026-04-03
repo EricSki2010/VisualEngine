@@ -16,6 +16,9 @@
 `VE::loadMesh(name, meshFilePath)`
   Registers a mesh from a .mesh binary file on disk.
 
+`VE::loadMeshDir(dirPath)`
+  Scans a directory for all `.mesh` files and registers each one. The filename (without extension) becomes the mesh name.
+
 `VE::setMode(mode)`
   Sets mesh build mode. SINGLE = one merged mesh with face culling. CHUNK = reserved for future chunked meshing.
 
@@ -34,14 +37,14 @@
 `VE::rebuild()`
   Forces a mesh rebuild. Normally happens automatically when needsRebuild is set.
 
-`VE::loadMeshDir(dirPath)`
-  Scans a directory for all `.mesh` files and registers each one. The filename (without extension) becomes the mesh name.
+`VE::setBrightness(brightness)`
+  Sets global brightness multiplier for the 3D shader. 1.0 = normal, lower = darker, higher = brighter. Does not affect UI.
 
 `VE::registerScene(name, onEnter, onExit, onInput, onUpdate, onRender)`
-  Registers a named scene with lifecycle hooks. See Scene Management section.
+  Registers a named scene with lifecycle hooks. onEnter receives `void* data`. See Scene Management section.
 
-`VE::setScene(name)`
-  Switches to a registered scene.
+`VE::setScene(name, data = nullptr)`
+  Switches to a registered scene. Optional `void* data` is passed to the new scene's onEnter.
 
 `VE::run()`
   Starts the main loop: processInput -> update -> render -> swap. Blocks until window closes. Calls active scene's onExit before cleanup.
@@ -59,12 +62,11 @@
 - `ctx.needsRebuild` — flag set by draw/undraw/setMode, consumed by update
 - `ctx.mode` — SINGLE or CHUNK
 - `ctx.mergedMeshes` — built mesh data ready for rendering
-- `ctx.postRenderCallback` — optional per-frame callback
 
 
 ## RENDERING
 **Header:** `VisualEngine/renderingManagement/render.h`
-**Implementations:** `VisualEngine/renderingManagement/Shader.cpp`, `VisualEngine/renderingManagement/Scene.cpp`, `VisualEngine/renderingManagement/Texture.cpp`, `VisualEngine/renderingManagement/Mesh.cpp`
+**Implementations:** `Shader.cpp`, `Scene.cpp`, `Texture.cpp`, `Mesh.cpp`
 
 `Shader(vertexSrc, fragmentSrc)`
   Compiles and links a shader program.
@@ -72,7 +74,7 @@
 
 `Scene(aspectRatio)`
   Holds projection matrix, view matrix, and a PointLight.
-  `scene.uploadStaticUniforms(shader)` — uploads light properties (once).
+  `scene.uploadStaticUniforms(shader)` — uploads light properties and default brightness (once).
   `scene.uploadFrameUniforms(shader, model)` — uploads model/projection/normal matrices (per frame).
 
 `Texture(filepath)`
@@ -80,7 +82,7 @@
   `texture.bind(unit)` — binds to a texture unit.
 
 `Mesh(vertices, vertexCount, indices, indexCount)`
-  Creates VAO/VBO/EBO from vertex data (position3 + uv2, normals computed automatically).
+  Creates VAO/VBO/EBO from vertex data (position3 + uv2, normals computed automatically). Default color is grey (0.8).
   `mesh.setTexture(tex)` — assigns a texture.
   `mesh.setColor(color)` — sets a solid color.
   `mesh.draw(shader)` — binds texture/color uniforms and draws.
@@ -97,7 +99,7 @@
   Deletes the overlay VAO/VBO.
 
 `drawTriangleOverlay(shader, triangle, color, alpha)`
-  Draws a single triangle as a semi-transparent overlay on top of existing geometry. Handles blend enable/disable and depth function.
+  Draws a single triangle as a semi-transparent overlay on top of existing geometry. Uses polygon offset to prevent z-fighting.
 
 `aabbFaceTriangle(box, faceIndex, half) -> Triangle`
   Converts one half of an AABB face into a triangle. faceIndex: 0=+X, 1=-X, 2=+Y, 3=-Y, 4=+Z, 5=-Z. half: 0 or 1 for the two triangles of the quad.
@@ -191,20 +193,28 @@
 **Header:** `VisualEngine/inputManagement/Camera.h`
 **Implementation:** `VisualEngine/inputManagement/Camera.cpp`
 
-`Camera { position, yaw, pitch, sensitivity, moveSpeed, ... }`
-  FPS-style camera with mouse look and WASD movement.
+`CameraMode` enum: `CAMERA_FPS` (perspective + movement), `CAMERA_FLAT` (orthographic, no input).
+
+`Camera { mode, position, yaw, pitch, sensitivity, moveSpeed, looking, ... }`
+  FPS-style camera with mouse look and WASD movement. Supports two modes.
+
+`camera.setMode(newMode)`
+  Switches between FPS and FLAT mode. FLAT resets position to origin.
 
 `camera.updateDir()`
   Recalculates the look direction from yaw/pitch.
 
 `camera.processKeyboard(window, dt)`
-  Handles WASD movement and Q to toggle mouse look.
+  Handles WASD movement and Q to toggle mouse look. Disabled in FLAT mode. Movement only when Q is active.
 
 `camera.getViewMatrix() -> mat4`
-  Returns the current view matrix.
+  Returns the current view matrix. Identity in FLAT mode.
+
+`camera.getProjectionMatrix(aspectRatio) -> mat4`
+  Returns perspective (FPS) or orthographic (FLAT) projection.
 
 `Camera::mouseCallback(window, xpos, ypos)`
-  GLFW mouse callback for look rotation.
+  GLFW mouse callback for look rotation. Disabled in FLAT mode.
 
 `getGlobalCamera() -> Camera*`
   Returns the single global camera instance.
@@ -215,27 +225,27 @@
 **Implementation:** `VisualEngine/renderingManagement/RenderLoop.cpp`
 
 `processInput(dt)`
-  Handles escape key and camera keyboard input.
+  Handles camera keyboard input and calls active scene's onInput.
 
 `update()`
-  Triggers rebuild if needed. Updates view matrix from camera.
+  Triggers rebuild if needed. Updates view matrix from camera. Calls active scene's onUpdate.
 
 `render()`
-  Clears screen, uploads uniforms, draws all meshes, calls active scene's onRender if set.
+  Re-binds 3D shader, clears screen, uploads uniforms, draws all meshes, calls active scene's onRender.
 
 
 ## SCENE MANAGEMENT
 **Header:** `VisualEngine/sceneManagement/SceneManager.h`
 **Implementation:** `VisualEngine/sceneManagement/SceneManager.cpp`
 
-`SceneDef { onEnter, onExit, onInput, onUpdate, onRender }`
-  Defines a scene's lifecycle hooks. All are optional (nullable).
+`SceneDef { onEnter(void*), onExit, onInput(float dt), onUpdate, onRender }`
+  Defines a scene's lifecycle hooks. All are optional (nullable). onEnter receives data from setScene.
 
 `VE::registerScene(name, onEnter, onExit, onInput, onUpdate, onRender)`
   Registers a named scene with its hooks. Nothing runs until setScene is called.
 
-`VE::setScene(name)`
-  Switches to a scene. Calls onExit on the current scene, then onEnter on the new one.
+`VE::setScene(name, data = nullptr)`
+  Switches to a scene. Calls onExit on the current scene, then onEnter on the new one with the provided data pointer.
 
 `getActiveScene() -> SceneDef*`
   Returns the currently active scene definition, or nullptr.
@@ -252,7 +262,7 @@
   Sets the base directory for saving/loading binary files.
 
 `saveToMemory(name, formatPath, data) -> bool`
-  Packs a vector of comma-separated strings into a compact binary file using a format definition. Each entry is bit-packed into a uint32 then RLE compressed. Saves to `{memoryPath}/{name}.bin`.
+  Packs a vector of comma-separated strings into a compact binary file using a format definition. Auto-detects 32 or 64 bit mode based on total bit width. RLE compressed. Saves to `{memoryPath}/{name}.bin`.
 
 `loadFromMemory(name, formatPath) -> vector<string>`
   Reads a `.bin` file, RLE decompresses, unpacks each entry, and returns comma-separated strings matching the original data.
@@ -267,3 +277,127 @@ rx -> 3
 ry -> 3
 rz -> 3
 ```
+
+
+## MODEL FILES
+**Header:** `VisualEngine/memoryManagement/ModelData.h`
+
+`FaceColor { color }`
+  RGB color for a triangle face. Default grey (0.8).
+
+`BlockTypeDef { name, vertices, vertexCount, indices, indexCount, faceColors }`
+  Defines a custom block shape with per-triangle colors.
+
+`BlockPlacement { x, y, z, typeId, rx, ry, rz }`
+  A placed block: position, which block type, rotation.
+
+`ModelFile { blockTypes, placements }`
+  Complete model file containing block type definitions and all placements.
+
+`saveModel(name, model) -> bool`
+  Saves a ModelFile to `{memoryPath}/{name}.mdl`. Binary format with magic header, block types section (vertices, indices, face colors), and placements section.
+
+`loadModel(name, model) -> bool`
+  Loads a `.mdl` file back into a ModelFile struct.
+
+
+## UI SYSTEM
+**Header:** `VisualEngine/uiManagement/UIElement.h`
+
+`UIElement { id, position, size, color, textureId, label, labelScale, labelColor, onClick, visible, isTextInput, focused, inputText, placeholder, maxLength, onUnfocus, requireConfirm, confirmId }`
+  UI element struct. Supports buttons, panels, images, and text inputs. Optional confirmation system via requireConfirm/confirmId.
+
+**Header:** `VisualEngine/uiManagement/UIRenderer.h`
+**Implementation:** `VisualEngine/uiManagement/UIRenderer.cpp`
+
+`initUIRenderer()`
+  Creates quad VAO/VBO and compiles the UI shader.
+
+`cleanupUIRenderer()`
+  Deletes UI GL resources and shader.
+
+`drawUIElement(element)`
+  Draws a single UI element as a colored/textured quad. Disables depth test, enables blending.
+
+**Header:** `VisualEngine/uiManagement/UIManager.h`
+**Implementation:** `VisualEngine/uiManagement/UIManager.cpp`
+
+`UIGroup { id, visible, elements }`
+  Named container of UI elements with shared visibility.
+
+`addUIGroup(groupId, visible = true)`
+  Creates a new UI group.
+
+`removeUIGroup(groupId)`
+  Removes a group and all its elements.
+
+`addToGroup(groupId, element)`
+  Adds a UI element to an existing group.
+
+`removeFromGroup(groupId, elementId)`
+  Removes a specific element from a group.
+
+`setGroupVisible(groupId, visible)`
+  Shows or hides all elements in a group.
+
+`getUIElement(groupId, elementId) -> UIElement*`
+  Returns a pointer to a specific element, or nullptr.
+
+`clearUI()`
+  Removes all groups and elements.
+
+`renderUI()`
+  Draws all visible groups/elements. Renders labels centered on buttons. Renders text input content with blinking cursor. Highlights focused inputs and pending confirm buttons.
+
+`processUIInput()`
+  Handles left-click detection and keyboard input for focused text fields. Supports letters, numbers, space, dash, underscore, backspace.
+
+`handleUIClick(mouseX, mouseY, screenWidth, screenHeight) -> bool`
+  Hit tests all visible elements back-to-front. Handles focus, confirmation system, and onClick. Returns true if something was hit.
+
+`getInputText(groupId, elementId) -> string`
+  Returns the current text in a text input element.
+
+`hasPendingConfirm() -> bool`
+  Returns true if a button is waiting for confirmation.
+
+`getPendingConfirmId() -> string`
+  Returns the confirmId of the pending action.
+
+`cancelPendingConfirm()`
+  Cancels any pending confirmation.
+
+**Header:** `VisualEngine/uiManagement/UIPrefabs.h`
+**Implementation:** `VisualEngine/uiManagement/UIPrefabs.cpp`
+
+`createButton(id, x, y, w, h, color, label, onClick) -> UIElement`
+  Creates a button with centered text label.
+
+`createPanel(id, x, y, w, h, color) -> UIElement`
+  Creates a solid colored rectangle.
+
+`createImage(id, x, y, w, h, textureId) -> UIElement`
+  Creates a textured rectangle.
+
+`createTextInput(id, x, y, w, h, color, placeholder, maxLength) -> UIElement`
+  Creates a clickable text input field with placeholder text.
+
+
+## TEXT RENDERING
+**Header:** `VisualEngine/uiManagement/TextRenderer.h`
+**Implementation:** `VisualEngine/uiManagement/TextRenderer.cpp`
+
+`initTextRenderer(fontPath, fontSize) -> bool`
+  Loads a .ttf font via FreeType, rasterizes ASCII glyphs into textures.
+
+`cleanupTextRenderer()`
+  Deletes all glyph textures and the text shader.
+
+`drawText(text, x, y, scale, color)`
+  Draws a string at pixel coordinates (top-left origin). Each character is a textured quad.
+
+`measureText(text, scale) -> float`
+  Returns the width in pixels of a rendered string.
+
+`measureTextHeight(scale) -> float`
+  Returns the height in pixels of capital letters at the given scale.

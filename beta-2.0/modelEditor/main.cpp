@@ -1,7 +1,9 @@
 #include "../VisualEngine/VisualEngine.h"
-#include "src/scenes.h"
+#include "src/mechanics/scenes.h"
+#include "src/mechanics/setup.h"
 
 int main() {
+    setupDirectories();
     VE::initWindow(800, 600, "Model Editor", true);
     VE::loadMeshDir("assets");
     VE::setMode(VE::SINGLE);

@@ -8,6 +8,11 @@ static std::vector<UIGroup> sGroups;
 static bool sWasLeftDown = false;
 static bool sKeyStates[GLFW_KEY_LAST + 1] = {};
 
+// Confirmation system
+static std::string sPendingConfirmId;
+static std::function<void()> sPendingAction;
+static std::string sPendingElementId;
+
 // Find the currently focused text input across all groups
 static UIElement* getFocusedInput() {
     for (auto& g : sGroups) {
@@ -22,7 +27,10 @@ static UIElement* getFocusedInput() {
 static void unfocusAll() {
     for (auto& g : sGroups)
         for (auto& e : g.elements)
-            if (e.isTextInput) e.focused = false;
+            if (e.isTextInput && e.focused) {
+                e.focused = false;
+                if (e.onUnfocus) e.onUnfocus(e.inputText);
+            }
 }
 
 void addUIGroup(const std::string& groupId, bool visible) {
@@ -86,10 +94,18 @@ void clearUI() {
 }
 
 // Convert normalized coords to pixel coords for text rendering
+static float getCorrectedWidth(const UIElement& e) {
+    if (e.aspectCorrected && ctx.width > 0) {
+        float aspect = (float)ctx.width / (float)ctx.height;
+        return e.size.x / aspect;
+    }
+    return e.size.x;
+}
+
 static void normToPixel(const UIElement& e, float& pixX, float& pixY, float& pixW, float& pixH) {
     pixX = (e.position.x + 1.0f) / 2.0f * ctx.width;
     pixY = (1.0f - e.position.y) / 2.0f * ctx.height;
-    pixW = e.size.x / 2.0f * ctx.width;
+    pixW = getCorrectedWidth(e) / 2.0f * ctx.width;
     pixH = e.size.y / 2.0f * ctx.height;
 }
 
@@ -97,8 +113,10 @@ void renderUI() {
     for (const auto& g : sGroups) {
         if (!g.visible) continue;
         for (const auto& e : g.elements) {
-            // Draw focused text inputs with a lighter border color
-            if (e.isTextInput && e.focused) {
+            // Draw focused text inputs or pending confirm buttons with lighter color
+            bool isPending = !sPendingConfirmId.empty() && e.requireConfirm &&
+                             e.id == sPendingElementId;
+            if ((e.isTextInput && e.focused) || isPending) {
                 UIElement highlight = e;
                 highlight.color = e.color + glm::vec4(0.15f, 0.15f, 0.15f, 0.0f);
                 drawUIElement(highlight);
@@ -233,19 +251,59 @@ bool handleUIClick(double mouseX, double mouseY, int screenWidth, int screenHeig
             UIElement& e = g.elements[ei];
             if (!e.visible) continue;
 
-            if (norm.x >= e.position.x && norm.x <= e.position.x + e.size.x &&
+            float corrW = getCorrectedWidth(e);
+            if (norm.x >= e.position.x && norm.x <= e.position.x + corrW &&
                 norm.y >= e.position.y && norm.y <= e.position.y + e.size.y) {
 
                 if (e.isTextInput) {
                     e.focused = true;
+                    cancelPendingConfirm();
                     return true;
                 }
+
+                // Button requires confirmation — set or replace pending
+                if (e.requireConfirm && !e.confirmId.empty()) {
+                    sPendingConfirmId = e.confirmId;
+                    sPendingAction = e.onClick;
+                    sPendingElementId = e.id;
+                    return true;
+                }
+
+                // Check if this button confirms a pending action
+                // (only non-requireConfirm buttons with matching confirmId)
+                if (!sPendingConfirmId.empty() && !e.requireConfirm &&
+                    !e.confirmId.empty() && e.confirmId == sPendingConfirmId) {
+                    auto action = std::move(sPendingAction);
+                    cancelPendingConfirm();
+                    if (action) action();
+                    return true;
+                }
+
+                // Normal button — cancel any pending and run
+                cancelPendingConfirm();
                 if (e.onClick) e.onClick();
                 return true;
             }
         }
     }
+
+    // Clicked empty space — cancel pending
+    cancelPendingConfirm();
     return false;
+}
+
+bool hasPendingConfirm() {
+    return !sPendingConfirmId.empty();
+}
+
+std::string getPendingConfirmId() {
+    return sPendingConfirmId;
+}
+
+void cancelPendingConfirm() {
+    sPendingConfirmId.clear();
+    sPendingAction = nullptr;
+    sPendingElementId.clear();
 }
 
 std::string getInputText(const std::string& groupId, const std::string& elementId) {
