@@ -11,11 +11,14 @@
 
 static bool sLoadView = false;
 static bool sFileTypeOpen = false;
+static std::string sFileDropdownOpen;
+static std::string sCurrentFileType;
 
 static void showMainMenu();
 static void showLoadMenu();
 static void showFileTypeDropdown();
 static void showFileList(const std::string& type);
+static void toggleFileDropdown(const std::string& name, float subX, float subY, float subW, float subH);
 
 static const float BTN_W = 0.4f;
 static const float BTN_H = 0.08f;
@@ -92,6 +95,51 @@ static void showFileTypeDropdown() {
     ));
 }
 
+static void closeFileDropdown() {
+    removeUIGroup("file_dropdown");
+    sFileDropdownOpen = "";
+}
+
+static void toggleFileDropdown(const std::string& name, float subX, float subY, float subW, float subH) {
+    if (sFileDropdownOpen == name) {
+        closeFileDropdown();
+        return;
+    }
+
+    closeFileDropdown();
+    sFileDropdownOpen = name;
+    addUIGroup("file_dropdown");
+
+    float dropX = subX + subW + subW * 0.5f;
+    float dropW = 0.15f;
+    float dropH = BTN_H * 0.7f;
+    float dropGap = dropH + 0.005f;
+    float dropY = subY;
+
+    addToGroup("file_dropdown", createButton("fd_delete",
+        dropX, dropY, dropW, dropH,
+        {0.5f, 0.1f, 0.1f, 0.95f}, "Delete",
+        [name]() {
+            std::string path = "assets/saves/3dModels/" + name + ".mdl";
+            std::filesystem::remove(path);
+            closeFileDropdown();
+            showFileList("3dModels");
+        }
+    ));
+
+    addToGroup("file_dropdown", createButton("fd_duplicate",
+        dropX, dropY - dropGap, dropW, dropH,
+        {0.2f, 0.2f, 0.4f, 0.95f}, "Duplicate",
+        [name]() {
+            std::string srcPath = "assets/saves/3dModels/" + name + ".mdl";
+            std::string dstPath = "assets/saves/3dModels/" + name + "_copy.mdl";
+            std::filesystem::copy_file(srcPath, dstPath, std::filesystem::copy_options::skip_existing);
+            closeFileDropdown();
+            showFileList("3dModels");
+        }
+    ));
+}
+
 static void showFileList(const std::string& type) {
     sFileTypeOpen = false;
     removeUIGroup("menu_buttons");
@@ -117,6 +165,29 @@ static void showFileList(const std::string& type) {
                 fileBtn.requireConfirm = true;
                 fileBtn.confirmId = "load_file";
                 addToGroup("menu_buttons", fileBtn);
+
+                {
+                    // Square button on the right: use parent height for both w and h
+                    float subH = BTN_H * 0.8f;
+                    float pad = BTN_H * 0.1f;
+                    float aspect = (float)ctx.width / (float)ctx.height;
+                    float subW = subH / aspect; // compensate for widescreen
+                    float subX = BTN_X + BTN_W - subW - pad;
+                    float subY = y + pad;
+
+                    float capturedSubX = subX, capturedSubY = subY;
+                    float capturedSubW = subW, capturedSubH = subH;
+                    UIElement menuBtn = createButton(btnId + "_menu",
+                        subX, subY, subW, subH,
+                        {0.35f, 0.35f, 0.35f, 1.0f}, ". . .",
+                        [name, capturedSubX, capturedSubY, capturedSubW, capturedSubH]() {
+                            toggleFileDropdown(name, capturedSubX, capturedSubY, capturedSubW, capturedSubH);
+                        }
+                    );
+                    menuBtn.labelScale = 0.2f;
+                    addToGroup("menu_buttons", menuBtn);
+                }
+
                 y -= GAP;
             }
         }

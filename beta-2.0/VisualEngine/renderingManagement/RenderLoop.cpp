@@ -31,6 +31,8 @@ void render() {
     Camera* cam = getGlobalCamera();
     glUniformMatrix4fv(ctx.shader->loc("view"), 1, GL_FALSE, glm::value_ptr(ctx.scene->view));
     glUniform3fv(ctx.shader->loc("viewPos"), 1, glm::value_ptr(cam->position));
+    glm::vec3 lightPos = cam->position + glm::vec3(0.0f, 5.0f, 0.0f);
+    glUniform3fv(ctx.shader->loc("lightPos"), 1, glm::value_ptr(lightPos));
 
     glm::mat4 model(1.0f);
     ctx.scene->uploadFrameUniforms(*ctx.shader, model);

@@ -4,9 +4,9 @@ project(modelEditor)
 
 set(CMAKE_CXX_STANDARD 17)
 
-# Enable AddressSanitizer for memory bug detection (disable for release builds)
-add_compile_options(/fsanitize=address /Zi)
-add_link_options(/DEBUG)
+# Enable AddressSanitizer for memory bug detection (uncomment for debugging)
+# add_compile_options(/fsanitize=address /Zi)
+# add_link_options(/DEBUG)
 
 add_executable(modelEditor
     main.cpp
@@ -17,6 +17,8 @@ add_executable(modelEditor
     ../VisualEngine/renderingManagement/Texture.cpp
     ../VisualEngine/renderingManagement/ChunkMesh.cpp
     ../VisualEngine/renderingManagement/Overlay.cpp
+    ../VisualEngine/renderingManagement/LineRenderer.cpp
+    ../VisualEngine/renderingManagement/DotRenderer.cpp
     ../VisualEngine/renderingManagement/RenderLoop.cpp
     ../VisualEngine/sceneManagement/SceneManager.cpp
     ../VisualEngine/memoryManagement/memory.cpp
@@ -34,6 +36,7 @@ add_executable(modelEditor
     src/prefabs/templates.cpp
     src/scenes/3dModeler.cpp
     src/scenes/createScene.cpp
+    src/scenes/vectorMesh.cpp
     src/scenes/menu.cpp
     E:/glad/src/glad.c
 )

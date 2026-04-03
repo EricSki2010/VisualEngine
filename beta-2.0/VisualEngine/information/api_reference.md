@@ -188,6 +188,12 @@
 `screenToRay(mouseX, mouseY, screenWidth, screenHeight, view, projection) -> Ray`
   Converts a screen-space mouse position to a world-space ray using unProject.
 
+`LineHit { hit, point, distanceToLine, screenDistance, t }`
+  Result of a ray-to-line test. point = exact 3D position on the line. t = 0-1 parameter along the line. screenDistance = pixel distance on screen.
+
+`rayToLine(ray, lineFrom, lineTo, mouseX, mouseY, screenW, screenH, view, projection, threshold = 5.0) -> LineHit`
+  Tests if a mouse click is near a 3D line segment. Uses 3D ray-to-segment closest point with screen-space pixel threshold. Returns the exact hit point on the line.
+
 
 ## CAMERA
 **Header:** `VisualEngine/inputManagement/Camera.h`
@@ -381,6 +387,40 @@ rz -> 3
 
 `createTextInput(id, x, y, w, h, color, placeholder, maxLength) -> UIElement`
   Creates a clickable text input field with placeholder text.
+
+`createSubButton(id, parentX, parentY, parentW, parentH, anchorX, anchorY, widthRatio, heightRatio, padding, color, label, onClick) -> UIElement`
+  Creates a button positioned relative to a parent element. anchorX/anchorY (0-1) control alignment. widthRatio/heightRatio are fractions of parent size. padding is fraction of parent height.
+
+
+## LINE RENDERER
+**Header:** `VisualEngine/renderingManagement/LineRenderer.h`
+**Implementation:** `VisualEngine/renderingManagement/LineRenderer.cpp`
+
+`initLineRenderer()`
+  Creates VAO/VBO and compiles the line shader.
+
+`cleanupLineRenderer()`
+  Deletes line GL resources and shader.
+
+`drawLine(from, to, color, width = 1.0)`
+  Draws a single line between two 3D world-space points.
+
+`drawLines(points, color, width = 1.0, loop = false)`
+  Draws connected lines through a list of points. loop = true connects last to first.
+
+
+## DOT RENDERER
+**Header:** `VisualEngine/renderingManagement/DotRenderer.h`
+**Implementation:** `VisualEngine/renderingManagement/DotRenderer.cpp`
+
+`initDotRenderer()`
+  Creates a billboard quad VAO/VBO and compiles the dot shader.
+
+`cleanupDotRenderer()`
+  Deletes dot GL resources and shader.
+
+`drawDot(position, size, color)`
+  Draws a billboard quad at a 3D position that always faces the camera. size is radius in world units. Draws on top of everything (depth test disabled).
 
 
 ## TEXT RENDERING

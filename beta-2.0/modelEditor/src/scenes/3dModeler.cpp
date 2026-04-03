@@ -10,13 +10,19 @@
 #include "../../../VisualEngine/uiManagement/EmbeddedFont.h"
 #include "../../../VisualEngine/memoryManagement/memory.h"
 #include "../../../VisualEngine/inputManagement/Collision.h"
+#include "../../../VisualEngine/inputManagement/Raycasting.h"
+#include "../../../VisualEngine/renderingManagement/LineRenderer.h"
+#include "../../../VisualEngine/renderingManagement/DotRenderer.h"
 #include <cmath>
+#include <vector>
 #include "../prefabs/3D_modeler/prefab_cube.h"
 
 static bool sPaused = false;
 static bool sWasEscDown = false;
+static bool sWasLeftDown = false;
 static std::string sModelName;
 static ModelFile sCurrentModel;
+
 
 static void saveCurrentModel() {
     // Rebuild placements from current colliders
@@ -150,6 +156,7 @@ void register3dModelerScene() {
         []() {
             if (!sPaused)
                 renderHoverHighlight();
+
             renderUI();
         }
     );
