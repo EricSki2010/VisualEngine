@@ -100,6 +100,7 @@ void register3dModelerScene() {
             initTextRendererFromMemory(EMBEDDED_FONT_DATA, EMBEDDED_FONT_SIZE, 48);
             VE::setBrightness(1.0f);
             VE::setCamera(6, 4, 6, 210, -25);
+            VE::setGradientBackground(true);
 
             // Load model if name was passed
             if (data) {
@@ -133,6 +134,7 @@ void register3dModelerScene() {
             cleanupUIRenderer();
             clearUI();
             VE::clearDraws();
+            VE::setGradientBackground(false);
         },
         // onInput
         [](float dt) {

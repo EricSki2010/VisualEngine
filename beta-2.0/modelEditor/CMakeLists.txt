@@ -19,6 +19,7 @@ add_executable(modelEditor
     ../VisualEngine/renderingManagement/Overlay.cpp
     ../VisualEngine/renderingManagement/LineRenderer.cpp
     ../VisualEngine/renderingManagement/DotRenderer.cpp
+    ../VisualEngine/renderingManagement/GradientBackground.cpp
     ../VisualEngine/renderingManagement/RenderLoop.cpp
     ../VisualEngine/sceneManagement/SceneManager.cpp
     ../VisualEngine/memoryManagement/memory.cpp

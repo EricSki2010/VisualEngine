@@ -3,6 +3,7 @@
 #include "sceneManagement/SceneManager.h"
 #include "renderingManagement/DefaultShaders.h"
 #include "renderingManagement/RenderLoop.h"
+#include "renderingManagement/GradientBackground.h"
 #include "inputManagement/Camera.h"
 #include "inputManagement/Collision.h"
 #include <iostream>
@@ -54,6 +55,7 @@ bool initWindow(int width, int height, const char* title, bool maximized) {
 
     ctx.shader = std::make_unique<Shader>(defaultVertSrc, defaultFragSrc);
     ctx.scene = std::make_unique<Scene>((float)ctx.width / (float)ctx.height);
+    initGradientBackground();
 
     return true;
 }
@@ -127,6 +129,11 @@ void rebuild() {
     ctx.needsRebuild = false;
 }
 
+void setGradientBackground(bool enable, glm::vec3 top, glm::vec3 bottom) {
+    enableGradientBackground(enable);
+    setGradientColors(top, bottom);
+}
+
 void setBrightness(float brightness) {
     ctx.shader->use();
     glUniform1f(ctx.shader->loc("brightness"), brightness);
@@ -177,6 +184,7 @@ void run() {
         active->onExit();
 
     ctx.mergedMeshes.clear();
+    cleanupGradientBackground();
     ctx.scene.reset();
     ctx.shader.reset();
     glfwTerminate();

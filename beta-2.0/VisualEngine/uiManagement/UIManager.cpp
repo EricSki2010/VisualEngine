@@ -281,7 +281,10 @@ bool handleUIClick(double mouseX, double mouseY, int screenWidth, int screenHeig
 
                 // Normal button — cancel any pending and run
                 cancelPendingConfirm();
-                if (e.onClick) e.onClick();
+                if (e.onClick) {
+                    auto action = e.onClick;
+                    action();
+                }
                 return true;
             }
         }
@@ -310,4 +313,75 @@ std::string getInputText(const std::string& groupId, const std::string& elementI
     UIElement* e = getUIElement(groupId, elementId);
     if (e && e->isTextInput) return e->inputText;
     return "";
+}
+
+void createDropdown(const std::string& groupId, const std::string& id,
+                    float x, float y, float w, float h,
+                    const glm::vec4& color, const std::string& label,
+                    const std::vector<std::string>& options,
+                    std::function<void(int index, const std::string& option)> onSelect,
+                    float offsetX, float offsetY) {
+    std::string dropGroupId = id + "_dropdown";
+
+    // Capture what we need for the toggle and option callbacks
+    auto optionsCopy = options;
+    auto onSelectCopy = onSelect;
+
+    // Main toggle button
+    UIElement btn = UIElement();
+    btn.id = id;
+    btn.position = glm::vec2(x, y);
+    btn.size = glm::vec2(w, h);
+    btn.color = color;
+    btn.label = label;
+    btn.onClick = [dropGroupId, id, x, y, w, h, color, offsetX, offsetY,
+                   optionsCopy, onSelectCopy, groupId]() {
+        // Toggle: if group exists, remove it; otherwise create it
+        bool exists = false;
+        for (const auto& g : sGroups)
+            if (g.id == dropGroupId) { exists = true; break; }
+
+        if (exists) {
+            removeUIGroup(dropGroupId);
+            return;
+        }
+
+        addUIGroup(dropGroupId);
+        float optY = y + offsetY;
+        float optX = x + offsetX;
+        glm::vec4 optColor = color + glm::vec4(0.05f, 0.05f, 0.05f, 0.0f);
+
+        for (int i = 0; i < (int)optionsCopy.size(); i++) {
+            std::string optId = dropGroupId + "_" + std::to_string(i);
+            std::string optLabel = optionsCopy[i];
+            int idx = i;
+            auto cb = onSelectCopy;
+            std::string dgid = dropGroupId;
+            std::string mainBtnGroup = groupId;
+            std::string mainBtnId = id;
+
+            UIElement opt = UIElement();
+            opt.id = optId;
+            opt.position = glm::vec2(optX, optY);
+            opt.size = glm::vec2(w, h);
+            opt.color = optColor;
+            opt.label = optLabel;
+            opt.onClick = [cb, idx, optLabel, dgid, mainBtnGroup, mainBtnId]() {
+                // Update the main button label before removing anything
+                UIElement* mainBtn = getUIElement(mainBtnGroup, mainBtnId);
+                if (mainBtn) mainBtn->label = optLabel;
+                // Copy callback and args before removing group (which invalidates 'this')
+                auto callback = cb;
+                int capturedIdx = idx;
+                std::string capturedLabel = optLabel;
+                std::string capturedDgid = dgid;
+                removeUIGroup(capturedDgid);
+                if (callback) callback(capturedIdx, capturedLabel);
+            };
+            addToGroup(dropGroupId, opt);
+            optY += offsetY;
+        }
+    };
+
+    addToGroup(groupId, btn);
 }

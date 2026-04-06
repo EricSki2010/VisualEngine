@@ -12,6 +12,36 @@ Ray screenToRay(double mouseX, double mouseY, int screenWidth, int screenHeight,
     return { worldNear, glm::normalize(worldFar - worldNear) };
 }
 
+TriangleHit rayToTriangle(const Ray& ray, const glm::vec3& v0, const glm::vec3& v1, const glm::vec3& v2) {
+    TriangleHit result = {};
+    result.hit = false;
+
+    const float EPSILON = 1e-7f;
+    glm::vec3 edge1 = v1 - v0;
+    glm::vec3 edge2 = v2 - v0;
+    glm::vec3 h = glm::cross(ray.direction, edge2);
+    float a = glm::dot(edge1, h);
+
+    if (a > -EPSILON && a < EPSILON) return result;
+
+    float f = 1.0f / a;
+    glm::vec3 s = ray.origin - v0;
+    float u = f * glm::dot(s, h);
+    if (u < 0.0f || u > 1.0f) return result;
+
+    glm::vec3 q = glm::cross(s, edge1);
+    float v = f * glm::dot(ray.direction, q);
+    if (v < 0.0f || u + v > 1.0f) return result;
+
+    float t = f * glm::dot(edge2, q);
+    if (t > EPSILON) {
+        result.hit = true;
+        result.distance = t;
+        result.point = ray.origin + t * ray.direction;
+    }
+    return result;
+}
+
 // Project a 3D point to screen pixel coords
 static glm::vec2 projectToScreen(const glm::vec3& point,
                                   const glm::mat4& view, const glm::mat4& projection,

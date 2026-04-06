@@ -24,3 +24,13 @@ std::string getInputText(const std::string& groupId, const std::string& elementI
 bool hasPendingConfirm();
 std::string getPendingConfirmId();
 void cancelPendingConfirm();
+
+// Dropdown: creates a toggle button + a group of option buttons that appear/disappear.
+// offsetX/offsetY control where the options appear relative to the main button.
+// onSelect receives the index and label of the selected option.
+void createDropdown(const std::string& groupId, const std::string& id,
+                    float x, float y, float w, float h,
+                    const glm::vec4& color, const std::string& label,
+                    const std::vector<std::string>& options,
+                    std::function<void(int index, const std::string& option)> onSelect,
+                    float offsetX = 0.0f, float offsetY = -0.09f);

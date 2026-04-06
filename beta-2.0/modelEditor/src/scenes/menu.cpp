@@ -10,15 +10,10 @@
 #include <filesystem>
 
 static bool sLoadView = false;
-static bool sFileTypeOpen = false;
-static std::string sFileDropdownOpen;
-static std::string sCurrentFileType;
 
 static void showMainMenu();
 static void showLoadMenu();
-static void showFileTypeDropdown();
 static void showFileList(const std::string& type);
-static void toggleFileDropdown(const std::string& name, float subX, float subY, float subW, float subH);
 
 static const float BTN_W = 0.4f;
 static const float BTN_H = 0.08f;
@@ -57,18 +52,20 @@ static void showMainMenu() {
 
 static void showLoadMenu() {
     sLoadView = true;
-    sFileTypeOpen = false;
     removeUIGroup("menu_buttons");
-    removeUIGroup("dropdown");
     addUIGroup("menu_buttons");
 
     float y = START_Y;
 
-    addToGroup("menu_buttons", createButton("select_file",
+    createDropdown("menu_buttons", "select_file",
         BTN_X, y, BTN_W, BTN_H, BTN_COLOR,
         "Select File Type...",
-        []() { showFileTypeDropdown(); }
-    ));
+        {"3D Model"},
+        [](int index, const std::string& option) {
+            if (option == "3D Model") showFileList("3dModels");
+        },
+        0.0f, -GAP
+    );
     y -= GAP;
 
     addToGroup("menu_buttons", createButton("back",
@@ -79,69 +76,7 @@ static void showLoadMenu() {
     ));
 }
 
-static void showFileTypeDropdown() {
-    if (sFileTypeOpen) {
-        removeUIGroup("dropdown");
-        sFileTypeOpen = false;
-        return;
-    }
-    sFileTypeOpen = true;
-    addUIGroup("dropdown");
-    addToGroup("dropdown", createButton("type_3dmodel",
-        BTN_X, START_Y - GAP, BTN_W, BTN_H,
-        {0.25f, 0.25f, 0.25f, 0.95f},
-        "3D Model",
-        []() { showFileList("3dModels"); }
-    ));
-}
-
-static void closeFileDropdown() {
-    removeUIGroup("file_dropdown");
-    sFileDropdownOpen = "";
-}
-
-static void toggleFileDropdown(const std::string& name, float subX, float subY, float subW, float subH) {
-    if (sFileDropdownOpen == name) {
-        closeFileDropdown();
-        return;
-    }
-
-    closeFileDropdown();
-    sFileDropdownOpen = name;
-    addUIGroup("file_dropdown");
-
-    float dropX = subX + subW + subW * 0.5f;
-    float dropW = 0.15f;
-    float dropH = BTN_H * 0.7f;
-    float dropGap = dropH + 0.005f;
-    float dropY = subY;
-
-    addToGroup("file_dropdown", createButton("fd_delete",
-        dropX, dropY, dropW, dropH,
-        {0.5f, 0.1f, 0.1f, 0.95f}, "Delete",
-        [name]() {
-            std::string path = "assets/saves/3dModels/" + name + ".mdl";
-            std::filesystem::remove(path);
-            closeFileDropdown();
-            showFileList("3dModels");
-        }
-    ));
-
-    addToGroup("file_dropdown", createButton("fd_duplicate",
-        dropX, dropY - dropGap, dropW, dropH,
-        {0.2f, 0.2f, 0.4f, 0.95f}, "Duplicate",
-        [name]() {
-            std::string srcPath = "assets/saves/3dModels/" + name + ".mdl";
-            std::string dstPath = "assets/saves/3dModels/" + name + "_copy.mdl";
-            std::filesystem::copy_file(srcPath, dstPath, std::filesystem::copy_options::skip_existing);
-            closeFileDropdown();
-            showFileList("3dModels");
-        }
-    ));
-}
-
 static void showFileList(const std::string& type) {
-    sFileTypeOpen = false;
     removeUIGroup("menu_buttons");
     removeUIGroup("dropdown");
     addUIGroup("menu_buttons");
@@ -167,11 +102,10 @@ static void showFileList(const std::string& type) {
                 addToGroup("menu_buttons", fileBtn);
 
                 {
-                    // Square button on the right: use parent height for both w and h
                     float subH = BTN_H * 0.8f;
                     float pad = BTN_H * 0.1f;
                     float aspect = (float)ctx.width / (float)ctx.height;
-                    float subW = subH / aspect; // compensate for widescreen
+                    float subW = subH / aspect;
                     float subX = BTN_X + BTN_W - subW - pad;
                     float subY = y + pad;
 
@@ -181,7 +115,38 @@ static void showFileList(const std::string& type) {
                         subX, subY, subW, subH,
                         {0.35f, 0.35f, 0.35f, 1.0f}, ". . .",
                         [name, capturedSubX, capturedSubY, capturedSubW, capturedSubH]() {
-                            toggleFileDropdown(name, capturedSubX, capturedSubY, capturedSubW, capturedSubH);
+                            // Toggle: close if already open
+                            if (getUIElement("file_dropdown", "fd_delete")) {
+                                removeUIGroup("file_dropdown");
+                                return;
+                            }
+
+                            addUIGroup("file_dropdown");
+                            float dropX = capturedSubX + capturedSubW + capturedSubW * 0.5f;
+                            float dropH = BTN_H * 0.7f;
+                            float dropGap = dropH + 0.005f;
+
+                            addToGroup("file_dropdown", createButton("fd_delete",
+                                dropX, capturedSubY, 0.15f, dropH,
+                                {0.5f, 0.1f, 0.1f, 0.95f}, "Delete",
+                                [name]() {
+                                    std::filesystem::remove("assets/saves/3dModels/" + name + ".mdl");
+                                    removeUIGroup("file_dropdown");
+                                    showFileList("3dModels");
+                                }
+                            ));
+
+                            addToGroup("file_dropdown", createButton("fd_duplicate",
+                                dropX, capturedSubY - dropGap, 0.15f, dropH,
+                                {0.2f, 0.2f, 0.4f, 0.95f}, "Duplicate",
+                                [name]() {
+                                    std::string src = "assets/saves/3dModels/" + name + ".mdl";
+                                    std::string dst = "assets/saves/3dModels/" + name + "_copy.mdl";
+                                    std::filesystem::copy_file(src, dst, std::filesystem::copy_options::skip_existing);
+                                    removeUIGroup("file_dropdown");
+                                    showFileList("3dModels");
+                                }
+                            ));
                         }
                     );
                     menuBtn.labelScale = 0.2f;
@@ -208,7 +173,7 @@ static void showFileList(const std::string& type) {
         BTN_X, y, BTN_W, BTN_H,
         {0.3f, 0.1f, 0.1f, 0.9f},
         "Back",
-        []() { showLoadMenu(); }
+        []() { removeUIGroup("file_dropdown"); showLoadMenu(); }
     ));
 }
 

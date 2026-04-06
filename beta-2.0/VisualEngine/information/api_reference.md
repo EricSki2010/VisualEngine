@@ -40,6 +40,9 @@
 `VE::setBrightness(brightness)`
   Sets global brightness multiplier for the 3D shader. 1.0 = normal, lower = darker, higher = brighter. Does not affect UI.
 
+`VE::setGradientBackground(enable, top = {0,0,0}, bottom = {0.7,0.7,0.7})`
+  Enables/disables a 3D gradient background that follows the camera view direction. Top color when looking up, bottom color when looking down.
+
 `VE::registerScene(name, onEnter, onExit, onInput, onUpdate, onRender)`
   Registers a named scene with lifecycle hooks. onEnter receives `void* data`. See Scene Management section.
 
@@ -193,6 +196,12 @@
 
 `rayToLine(ray, lineFrom, lineTo, mouseX, mouseY, screenW, screenH, view, projection, threshold = 5.0) -> LineHit`
   Tests if a mouse click is near a 3D line segment. Uses 3D ray-to-segment closest point with screen-space pixel threshold. Returns the exact hit point on the line.
+
+`TriangleHit { hit, distance, point }`
+  Result of a ray-to-triangle test. point = exact 3D hit position on the triangle.
+
+`rayToTriangle(ray, v0, v1, v2) -> TriangleHit`
+  Möller-Trumbore ray-triangle intersection. Returns hit point and distance if the ray passes through the triangle.
 
 
 ## CAMERA
@@ -421,6 +430,29 @@ rz -> 3
 
 `drawDot(position, size, color)`
   Draws a billboard quad at a 3D position that always faces the camera. size is radius in world units. Draws on top of everything (depth test disabled).
+
+
+## GRADIENT BACKGROUND
+**Header:** `VisualEngine/renderingManagement/GradientBackground.h`
+**Implementation:** `VisualEngine/renderingManagement/GradientBackground.cpp`
+
+`initGradientBackground()`
+  Creates fullscreen quad and compiles gradient shader. Called automatically by engine init.
+
+`cleanupGradientBackground()`
+  Deletes gradient GL resources. Called automatically on engine shutdown.
+
+`setGradientColors(top, bottom)`
+  Sets the gradient top and bottom colors.
+
+`enableGradientBackground(enable)`
+  Toggles the gradient on/off.
+
+`isGradientBackgroundEnabled() -> bool`
+  Returns whether the gradient is currently enabled.
+
+`drawGradientBackground()`
+  Draws the gradient as a fullscreen quad behind everything. Called automatically each frame in render(). Uses inverse view-projection to map screen pixels to world-space view directions.
 
 
 ## TEXT RENDERING

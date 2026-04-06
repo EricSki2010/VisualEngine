@@ -20,6 +20,14 @@ struct LineHit {
 
 // Test if a mouse position is close to a line segment on screen.
 // threshold = max pixel distance to count as a hit.
+struct TriangleHit {
+    bool hit;
+    float distance;
+    glm::vec3 point;
+};
+
+TriangleHit rayToTriangle(const Ray& ray, const glm::vec3& v0, const glm::vec3& v1, const glm::vec3& v2);
+
 LineHit rayToLine(const Ray& ray, const glm::vec3& lineFrom, const glm::vec3& lineTo,
                   double mouseX, double mouseY, int screenWidth, int screenHeight,
                   const glm::mat4& view, const glm::mat4& projection,

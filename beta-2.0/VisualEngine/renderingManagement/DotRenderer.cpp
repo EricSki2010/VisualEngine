@@ -46,20 +46,30 @@ void cleanupDotRenderer() {
     sDotShader = nullptr;
 }
 
-void drawDot(const glm::vec3& position, float size, const glm::vec3& color) {
+void drawDot(const glm::vec3& position, float size, const glm::vec3& color, float alpha) {
     if (!sDotShader) return;
 
     sDotShader->use();
     glUniform3fv(sDotShader->loc("uCenter"), 1, glm::value_ptr(position));
-    glUniform1f(sDotShader->loc("uSize"), size);
+
+    // Scale size by distance from camera
+    glm::vec3 camPos = glm::vec3(glm::inverse(ctx.scene->view)[3]);
+    float dist = glm::length(position - camPos);
+    float scaledSize = size * 2.0f * glm::clamp(1.0f / (dist * 0.5f + 1.0f), 0.1f, 1.0f);
+    scaledSize = glm::min(scaledSize, size * 2.0f);
+    glUniform1f(sDotShader->loc("uSize"), scaledSize);
     glUniform3fv(sDotShader->loc("uColor"), 1, glm::value_ptr(color));
+    glUniform1f(sDotShader->loc("uAlpha"), alpha);
     glUniformMatrix4fv(sDotShader->loc("view"), 1, GL_FALSE, glm::value_ptr(ctx.scene->view));
     glUniformMatrix4fv(sDotShader->loc("projection"), 1, GL_FALSE, glm::value_ptr(ctx.scene->projection));
 
-    glDisable(GL_DEPTH_TEST);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glDepthFunc(GL_LEQUAL);
     glBindVertexArray(sDotVAO);
     glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
-    glEnable(GL_DEPTH_TEST);
+    glDepthFunc(GL_LESS);
+    glDisable(GL_BLEND);
 
     glBindVertexArray(0);
 }

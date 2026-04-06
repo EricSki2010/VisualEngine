@@ -2,6 +2,7 @@
 
 #include <string>
 #include <functional>
+#include <glm/glm.hpp>
 
 namespace VE {
 
@@ -37,6 +38,7 @@ void registerScene(const std::string& name, std::function<void(void*)> onEnter,
                    std::function<void()> onRender);
 void setScene(const std::string& name, void* data = nullptr);
 void setBrightness(float brightness);
+void setGradientBackground(bool enable, glm::vec3 top = glm::vec3(0.0f), glm::vec3 bottom = glm::vec3(0.7f));
 void run();
 
 } // namespace VE

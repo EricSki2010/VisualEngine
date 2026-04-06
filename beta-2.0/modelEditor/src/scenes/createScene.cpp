@@ -15,7 +15,6 @@ static std::string sSelectedType;
 static std::string sSelectedTemplate;
 static std::string sSavedName;
 static std::string sSavedCubeSize;
-static bool sDropdownOpen = false;
 static bool sTypeSelected = false;
 static bool sPickingTemplate = false;
 
@@ -30,34 +29,6 @@ static void showTemplatePicker();
 static void selectTemplate(const std::string& tmpl);
 static void saveInputs();
 
-static void closeDropdown() {
-    sDropdownOpen = false;
-    removeUIGroup("dropdown_options");
-}
-
-static void selectType(const std::string& type) {
-    saveInputs();
-    sSelectedType = type;
-    sTypeSelected = true;
-    closeDropdown();
-    rebuildLayout();
-}
-
-static void toggleDropdown() {
-    if (sDropdownOpen) {
-        closeDropdown();
-        return;
-    }
-    sDropdownOpen = true;
-
-    addUIGroup("dropdown_options");
-    addToGroup("dropdown_options", createButton("opt_3dmodel",
-        BTN_X, START_Y - GAP, BTN_W, BTN_H,
-        {0.25f, 0.25f, 0.25f, 0.95f},
-        "3D Model",
-        []() { selectType("3D Model"); }
-    ));
-}
 
 static void selectTemplate(const std::string& tmpl) {
     sSelectedTemplate = tmpl;
@@ -115,14 +86,21 @@ static void rebuildLayout() {
 
     float y = START_Y;
 
-    // Dropdown
+    // Type dropdown
     std::string dropLabel = sTypeSelected ? sSelectedType : "Select Type...";
-    addToGroup("create_ui", createButton("dropdown_btn",
+    createDropdown("create_ui", "dropdown_btn",
         BTN_X, y, BTN_W, BTN_H,
         {0.15f, 0.15f, 0.15f, 0.95f},
         dropLabel,
-        []() { toggleDropdown(); }
-    ));
+        {"3D Model"},
+        [](int index, const std::string& option) {
+            saveInputs();
+            sSelectedType = option;
+            sTypeSelected = true;
+            rebuildLayout();
+        },
+        0.0f, -GAP
+    );
     y -= GAP;
 
     // Name input + Create (only if type selected)
@@ -211,7 +189,7 @@ void registerCreateScene() {
             sSelectedTemplate = "";
             sSavedName = "";
             sSavedCubeSize = "";
-            sDropdownOpen = false;
+
             sTypeSelected = false;
             sPickingTemplate = false;
             getGlobalCamera()->setMode(CAMERA_FLAT);
@@ -221,7 +199,7 @@ void registerCreateScene() {
         },
         // onExit
         []() {
-            sDropdownOpen = false;
+
             sSelectedType = "";
             sSelectedTemplate = "";
             sTypeSelected = false;
