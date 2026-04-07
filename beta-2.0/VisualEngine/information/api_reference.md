@@ -65,6 +65,7 @@
 - `ctx.needsRebuild` — flag set by draw/undraw/setMode, consumed by update
 - `ctx.mode` — SINGLE or CHUNK
 - `ctx.mergedMeshes` — built mesh data ready for rendering
+- `ctx.scrollDelta` — mouse scroll delta for the current frame (reset each frame)
 
 
 ## RENDERING
@@ -85,7 +86,11 @@
   `texture.bind(unit)` — binds to a texture unit.
 
 `Mesh(vertices, vertexCount, indices, indexCount)`
-  Creates VAO/VBO/EBO from vertex data (position3 + uv2, normals computed automatically). Default color is grey (0.8).
+  Creates VAO/VBO/EBO from vertex data (position3 + uv2 = 5 floats, normals computed automatically). Default color is grey (0.8).
+
+`Mesh(verticesWithNormals, vertexCount, indices, indexCount, hasNormals)`
+  Creates VAO/VBO/EBO from vertex data with pre-computed normals (position3 + uv2 + normal3 = 8 floats). Skips normal computation.
+
   `mesh.setTexture(tex)` — assigns a texture.
   `mesh.setColor(color)` — sets a solid color.
   `mesh.draw(shader)` — binds texture/color uniforms and draws.
@@ -139,6 +144,21 @@
 `clearMeshData()`
   Clears both the mesh registry and draw list.
 
+`registerMeshWithStates(name, vertices, vertexCount, interleavedIndices, triCount, texturePath)`
+  Registers a mesh with per-triangle cull states. Index data is interleaved: v0,v1,v2,state for each triangle. States: 0=never cull, 1=partial wall (cull if neighbor has state 2), 2=solid wall (cull if neighbor has state 2).
+
+`setMeshSolidFaces(name, faces[6])`
+  Manually sets which face directions are solid for culling.
+
+`RegisteredMesh.floatsPerVertex`
+  5 = pos3+uv2 (normals computed), 8 = pos3+uv2+normal3 (pre-computed normals).
+
+`RegisteredMesh.triCullState`
+  Per-triangle cull state vector. Derived from interleaved index data.
+
+`RegisteredMesh.solidFaces[6]`
+  Auto-derived from state 2 triangles. Used for neighbor culling checks.
+
 
 ## COLLISION
 **Header:** `VisualEngine/inputManagement/Collision.h`
@@ -159,8 +179,8 @@
 `isMeshRectangular(vertices, vertexCount) -> bool`
   Returns true if all vertices lie on the faces of their bounding box.
 
-`addCollider(meshName, vertices, vertexCount, indices, indexCount, rectangular, x, y, z)`
-  Creates a collider at a world position.
+`addCollider(meshName, vertices, vertexCount, indices, indexCount, rectangular, x, y, z, floatsPerVertex = 5)`
+  Creates a collider at a world position. Supports 5-float (pos+uv) or 8-float (pos+uv+normal) vertex stride.
 
 `removeCollider(x, y, z)`
   Removes the collider at a position.
@@ -178,7 +198,13 @@
   Returns all active colliders.
 
 `raycast(origin, direction, maxDist=50) -> CollisionHit`
-  Casts a ray against all colliders. Returns the closest hit.
+  Casts a ray against all colliders. Returns the closest hit. Respects forceRectangular mode.
+
+`setForceRectangularRaycast(force)`
+  When true, all colliders use AABB raycasting regardless of mesh shape. Used for build mode.
+
+`isForceRectangularRaycast() -> bool`
+  Returns whether force rectangular mode is active.
 
 
 ## RAYCASTING
@@ -246,7 +272,7 @@
   Triggers rebuild if needed. Updates view matrix from camera. Calls active scene's onUpdate.
 
 `render()`
-  Re-binds 3D shader, clears screen, uploads uniforms, draws all meshes, calls active scene's onRender.
+  Re-binds 3D shader, resets brightness to 1.0, clears screen, draws gradient background if enabled, uploads uniforms, draws all meshes, calls active scene's onRender. Scenes that want dimming set brightness in their onRender each frame.
 
 
 ## SCENE MANAGEMENT
@@ -300,8 +326,8 @@ rz -> 3
 `FaceColor { color }`
   RGB color for a triangle face. Default grey (0.8).
 
-`BlockTypeDef { name, vertices, vertexCount, indices, indexCount, faceColors }`
-  Defines a custom block shape with per-triangle colors.
+`BlockTypeDef { name, vertices, vertexCount, floatsPerVertex, indices, indexCount, faceColors }`
+  Defines a custom block shape with per-triangle colors. floatsPerVertex = 5 (pos+uv) or 8 (pos+uv+normal).
 
 `BlockPlacement { x, y, z, typeId, rx, ry, rz }`
   A placed block: position, which block type, rotation.
@@ -310,10 +336,19 @@ rz -> 3
   Complete model file containing block type definitions and all placements.
 
 `saveModel(name, model) -> bool`
-  Saves a ModelFile to `{memoryPath}/{name}.mdl`. Binary format with magic header, block types section (vertices, indices, face colors), and placements section.
+  Saves a ModelFile to `{memoryPath}/{name}.mdl`. Version 2 format with magic header, floatsPerVertex per block type, block types section (vertices, indices, face colors), and placements section.
 
 `loadModel(name, model) -> bool`
-  Loads a `.mdl` file back into a ModelFile struct.
+  Loads a `.mdl` file back into a ModelFile struct. Supports v1 (5-float) and v2 (variable floatsPerVertex).
+
+### Mesh File Formats
+
+**.mesh (legacy):** `[vertexCount:u32][indexCount:u32][texPathLen:u32][vertices: vertexCount*5 floats][indices: indexCount u32s][texPath]`
+
+**.mesh (VN):** `"VN"[vertexCount:u32][indexCount:u32][texPathLen:u32][vertices: vertexCount*8 floats (pos3+uv2+normal3)][indices][texPath]`
+  Includes pre-computed normals. Detected by "VN" magic header.
+
+**.vmesh:** Binary format for vector mesh editor data. Stores dots (vec3 array), lines (index pairs), triangles (index triples + flipped flag).
 
 
 ## UI SYSTEM
@@ -430,6 +465,26 @@ rz -> 3
 
 `drawDot(position, size, color)`
   Draws a billboard quad at a 3D position that always faces the camera. size is radius in world units. Draws on top of everything (depth test disabled).
+
+
+## RENDER TO TEXTURE
+**Header:** `VisualEngine/renderingManagement/RenderToTexture.h`
+**Implementation:** `VisualEngine/renderingManagement/RenderToTexture.cpp`
+
+`RenderTarget { fbo, textureId, depthRbo, width, height }`
+  Framebuffer object with color texture and depth buffer.
+
+`createRenderTarget(width, height) -> RenderTarget`
+  Creates a framebuffer with color texture and depth renderbuffer.
+
+`bindRenderTarget(rt)`
+  Switches rendering to the render target's framebuffer.
+
+`unbindRenderTarget(screenWidth, screenHeight)`
+  Switches back to the default framebuffer (screen).
+
+`destroyRenderTarget(rt)`
+  Deletes the framebuffer, texture, and depth buffer.
 
 
 ## GRADIENT BACKGROUND
