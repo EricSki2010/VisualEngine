@@ -49,6 +49,7 @@ public:
     unsigned int id;
 
     Texture(const char* filepath);
+    Texture(const unsigned char* data, int dataSize);
     ~Texture();
     Texture(const Texture&) = delete;
     Texture& operator=(const Texture&) = delete;

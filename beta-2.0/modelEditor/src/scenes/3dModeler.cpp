@@ -22,6 +22,7 @@
 #include <fstream>
 #include <iostream>
 #include "../prefabs/3D_modeler/prefab_cube.h"
+#include "../prefabs/EmbeddedSelectors.h"
 #include "../prefabs/3D_modeler/prefab_wedge.h"
 
 static bool sPaused = false;
@@ -231,8 +232,8 @@ void register3dModelerScene() {
             }
 
             // Load block selector textures
-            sBlockSelectorPlus = new Texture("builtInAssets/blockSelector+.png");
-            sBlockSelectorMinus = new Texture("builtInAssets/blockSelector-.png");
+            sBlockSelectorPlus = new Texture(EMBEDDED_SELECTOR_PLUS, EMBEDDED_SELECTOR_PLUS_SIZE);
+            sBlockSelectorMinus = new Texture(EMBEDDED_SELECTOR_MINUS, EMBEDDED_SELECTOR_MINUS_SIZE);
             sPreviewAngle = 0.0f;
             sLastPreviewTime = glfwGetTime();
 

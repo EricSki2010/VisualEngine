@@ -1,8 +1,10 @@
 cmake_minimum_required(VERSION 3.20)
 set(CMAKE_TOOLCHAIN_FILE "C:/vcpkg/scripts/buildsystems/vcpkg.cmake" CACHE STRING "")
+set(VCPKG_TARGET_TRIPLET "x64-windows-static" CACHE STRING "")
 project(modelEditor)
 
 set(CMAKE_CXX_STANDARD 17)
+set_property(GLOBAL PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
 # Enable AddressSanitizer for memory bug detection (uncomment for debugging)
 # add_compile_options(/fsanitize=address /Zi)
@@ -46,19 +48,16 @@ add_executable(modelEditor
 target_include_directories(modelEditor PRIVATE
     ../VisualEngine
     E:/glad/include
-    E:/glfw-3.4.bin.WIN64/glfw-3.4.bin.WIN64/include
-    C:/vcpkg/installed/x64-windows/include
     C:/vcpkg/installed/x64-windows-static/include
 )
 
-target_link_directories(modelEditor PRIVATE
-    E:/glfw-3.4.bin.WIN64/glfw-3.4.bin.WIN64/lib-vc2022
-)
+set_property(TARGET modelEditor PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
+find_package(glfw3 CONFIG REQUIRED)
 find_package(Freetype REQUIRED)
 
 target_link_libraries(modelEditor PRIVATE
-    glfw3
+    glfw
     opengl32
     gdi32
     user32
