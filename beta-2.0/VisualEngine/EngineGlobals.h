@@ -14,6 +14,7 @@ struct EngineContext {
     bool needsRebuild = true;
     VE::MeshMode mode = VE::SINGLE;
     std::vector<MergedMeshEntry> mergedMeshes;
+    float scrollDelta = 0.0f; // mouse scroll this frame
 };
 
 extern EngineContext ctx;

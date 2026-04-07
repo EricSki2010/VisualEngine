@@ -11,6 +11,8 @@ void processInput(float dt) {
     SceneDef* scene = getActiveScene();
     if (scene && scene->onInput)
         scene->onInput(dt);
+
+    ctx.scrollDelta = 0.0f;
 }
 
 void update() {
@@ -31,6 +33,7 @@ void render() {
     drawGradientBackground();
 
     ctx.shader->use();
+    glUniform1f(ctx.shader->loc("brightness"), 1.0f); // reset brightness each frame
     Camera* cam = getGlobalCamera();
     glUniformMatrix4fv(ctx.shader->loc("view"), 1, GL_FALSE, glm::value_ptr(ctx.scene->view));
     glUniform3fv(ctx.shader->loc("viewPos"), 1, glm::value_ptr(cam->position));

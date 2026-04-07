@@ -14,6 +14,15 @@ struct IVec3Hash {
 
 static std::unordered_map<glm::ivec3, size_t, IVec3Hash> gSpatialHash; // grid pos → index into gColliders
 static std::vector<BlockCollider> gColliders;
+static bool gForceRectangular = false;
+
+void setForceRectangularRaycast(bool force) {
+    gForceRectangular = force;
+}
+
+bool isForceRectangularRaycast() {
+    return gForceRectangular;
+}
 
 static glm::ivec3 toGrid(float x, float y, float z) {
     return glm::ivec3((int)roundf(x), (int)roundf(y), (int)roundf(z));
@@ -22,7 +31,8 @@ static glm::ivec3 toGrid(float x, float y, float z) {
 // ── Rectangular detection ───────────────────────────────────────────
 
 bool isMeshRectangular(const float* vertices, int vertexCount) {
-    if (vertexCount < 4) return false;
+    // Must have exactly 24 vertices (4 per face x 6 faces) for the cube build path
+    if (vertexCount != 24) return false;
 
     glm::vec3 mn(std::numeric_limits<float>::max());
     glm::vec3 mx(std::numeric_limits<float>::lowest());
@@ -49,7 +59,8 @@ bool isMeshRectangular(const float* vertices, int vertexCount) {
 
 void addCollider(const char* meshName, const float* vertices, int vertexCount,
                  const unsigned int* indices, int indexCount,
-                 bool rectangular, float x, float y, float z) {
+                 bool rectangular, float x, float y, float z, int floatsPerVertex) {
+    int fpv = floatsPerVertex;
     BlockCollider col;
     col.position = glm::vec3(x, y, z);
     col.meshName = meshName;
@@ -58,9 +69,9 @@ void addCollider(const char* meshName, const float* vertices, int vertexCount,
     col.bounds.min = glm::vec3(std::numeric_limits<float>::max());
     col.bounds.max = glm::vec3(std::numeric_limits<float>::lowest());
     for (int i = 0; i < vertexCount; i++) {
-        float vx = vertices[i * 5 + 0] + x;
-        float vy = vertices[i * 5 + 1] + y;
-        float vz = vertices[i * 5 + 2] + z;
+        float vx = vertices[i * fpv + 0] + x;
+        float vy = vertices[i * fpv + 1] + y;
+        float vz = vertices[i * fpv + 2] + z;
         col.bounds.min = glm::min(col.bounds.min, glm::vec3(vx, vy, vz));
         col.bounds.max = glm::max(col.bounds.max, glm::vec3(vx, vy, vz));
     }
@@ -69,9 +80,9 @@ void addCollider(const char* meshName, const float* vertices, int vertexCount,
         for (int i = 0; i < indexCount; i += 3) {
             unsigned int i0 = indices[i], i1 = indices[i + 1], i2 = indices[i + 2];
             Triangle tri;
-            tri.v0 = glm::vec3(vertices[i0 * 5 + 0] + x, vertices[i0 * 5 + 1] + y, vertices[i0 * 5 + 2] + z);
-            tri.v1 = glm::vec3(vertices[i1 * 5 + 0] + x, vertices[i1 * 5 + 1] + y, vertices[i1 * 5 + 2] + z);
-            tri.v2 = glm::vec3(vertices[i2 * 5 + 0] + x, vertices[i2 * 5 + 1] + y, vertices[i2 * 5 + 2] + z);
+            tri.v0 = glm::vec3(vertices[i0 * fpv + 0] + x, vertices[i0 * fpv + 1] + y, vertices[i0 * fpv + 2] + z);
+            tri.v1 = glm::vec3(vertices[i1 * fpv + 0] + x, vertices[i1 * fpv + 1] + y, vertices[i1 * fpv + 2] + z);
+            tri.v2 = glm::vec3(vertices[i2 * fpv + 0] + x, vertices[i2 * fpv + 1] + y, vertices[i2 * fpv + 2] + z);
             col.triangles.push_back(tri);
         }
     }
@@ -185,7 +196,7 @@ CollisionHit raycast(const glm::vec3& origin, const glm::vec3& direction, float 
     glm::vec3 invDir = 1.0f / dir;
 
     for (const auto& col : gColliders) {
-        if (col.isRectangular) {
+        if (col.isRectangular || gForceRectangular) {
             float dist;
             glm::vec3 normal;
             if (rayAABB(origin, invDir, col.bounds, closest.distance, dist, normal)) {

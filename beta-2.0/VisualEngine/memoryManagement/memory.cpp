@@ -267,7 +267,7 @@ bool saveModel(const std::string& name, const ModelFile& model) {
 
     // Magic + version
     out.write("MDL", 3);
-    uint8_t version = 1;
+    uint8_t version = 2;
     out.write(reinterpret_cast<const char*>(&version), 1);
 
     // Block types section
@@ -276,8 +276,9 @@ bool saveModel(const std::string& name, const ModelFile& model) {
         writeString(out, bt.name);
         writeU32(out, (uint32_t)bt.vertexCount);
         writeU32(out, (uint32_t)bt.indexCount);
+        writeU32(out, (uint32_t)bt.floatsPerVertex);
 
-        // Vertices (position3 + uv2 = 5 floats per vertex)
+        // Vertices
         for (float v : bt.vertices) writeF32(out, v);
 
         // Indices
@@ -340,9 +341,11 @@ bool loadModel(const std::string& name, ModelFile& model) {
         bt.name = readString(in);
         bt.vertexCount = (int)readU32(in);
         bt.indexCount = (int)readU32(in);
+        bt.floatsPerVertex = (version >= 2) ? (int)readU32(in) : 5;
 
-        bt.vertices.resize(bt.vertexCount * 5);
-        for (int i = 0; i < bt.vertexCount * 5; i++)
+        int totalFloats = bt.vertexCount * bt.floatsPerVertex;
+        bt.vertices.resize(totalFloats);
+        for (int i = 0; i < totalFloats; i++)
             bt.vertices[i] = readF32(in);
 
         bt.indices.resize(bt.indexCount);

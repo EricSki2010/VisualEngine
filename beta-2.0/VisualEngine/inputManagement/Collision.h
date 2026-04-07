@@ -35,7 +35,7 @@ bool isMeshRectangular(const float* vertices, int vertexCount);
 
 void addCollider(const char* meshName, const float* vertices, int vertexCount,
                  const unsigned int* indices, int indexCount,
-                 bool rectangular, float x, float y, float z);
+                 bool rectangular, float x, float y, float z, int floatsPerVertex = 5);
 void removeCollider(float x, float y, float z);
 void clearColliders();
 bool hasColliderAt(int x, int y, int z);
@@ -43,3 +43,5 @@ const BlockCollider* getColliderAt(int x, int y, int z);
 const std::vector<BlockCollider>& getAllColliders();
 
 CollisionHit raycast(const glm::vec3& origin, const glm::vec3& direction, float maxDist = 50.0f);
+void setForceRectangularRaycast(bool force);
+bool isForceRectangularRaycast();

@@ -10,8 +10,9 @@ struct FaceColor {
 
 struct BlockTypeDef {
     std::string name;
-    std::vector<float> vertices;     // position3 + uv2 per vertex
+    std::vector<float> vertices;     // pos3+uv2 (5) or pos3+uv2+normal3 (8) per vertex
     int vertexCount = 0;
+    int floatsPerVertex = 5;
     std::vector<unsigned int> indices;
     int indexCount = 0;
     std::vector<FaceColor> faceColors; // one per triangle (indexCount / 3)

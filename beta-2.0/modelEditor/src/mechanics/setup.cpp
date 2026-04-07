@@ -3,4 +3,5 @@
 
 void setupDirectories() {
     std::filesystem::create_directories("assets/saves/3dModels");
+    std::filesystem::create_directories("assets/saves/vectorMeshes");
 }

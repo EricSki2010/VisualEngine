@@ -63,6 +63,7 @@ public:
     glm::vec3 color = glm::vec3(0.8f);
 
     Mesh(float* vertices, int vertexCount, unsigned int* indices, int indexCount);
+    Mesh(float* verticesWithNormals, int vertexCount, unsigned int* indices, int indexCount, bool hasNormals);
     ~Mesh();
     Mesh(const Mesh&) = delete;
     Mesh& operator=(const Mesh&) = delete;

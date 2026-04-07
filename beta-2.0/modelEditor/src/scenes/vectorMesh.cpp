@@ -12,9 +12,13 @@
 #include "../../../VisualEngine/uiManagement/UIPrefabs.h"
 #include "../../../VisualEngine/uiManagement/TextRenderer.h"
 #include "../../../VisualEngine/uiManagement/EmbeddedFont.h"
+#include "SceneData.h"
+#include "../../../VisualEngine/memoryManagement/memory.h"
 #include <vector>
 #include <string>
 #include <cmath>
+#include <fstream>
+#include <iostream>
 
 // 8 corners of a unit cube centered at origin
 static const glm::vec3 cubeVerts[8] = {
@@ -59,7 +63,196 @@ static std::vector<int> sPlaneSelectedDots; // indices into sPlacedDots, max 3
 struct PlacedTriangle { int dotA; int dotB; int dotC; bool flipped = false; };
 static std::vector<PlacedTriangle> sPlacedTriangles;
 static int sHoverTriIndex = -1;
-static int sSelectedTriIndex = -1; // triangle selected for editing
+static int sSelectedTriIndex = -1;
+
+// File state
+static std::string sVMeshName;
+static int sReturnSlot = -1;
+static std::string sReturnModelName;
+static bool sVMeshPaused = false;
+static bool sVMeshWasEscDown = false;
+
+static void saveVectorMesh() {
+    if (sVMeshName.empty()) return;
+    setMemoryPath("assets/saves/vectorMeshes");
+    std::string path = "assets/saves/vectorMeshes/" + sVMeshName + ".vmesh";
+    std::ofstream out(path, std::ios::binary);
+    if (!out) { std::cerr << "Failed to save: " << path << std::endl; return; }
+
+    // Write dots
+    uint32_t dotCount = (uint32_t)sPlacedDots.size();
+    out.write(reinterpret_cast<const char*>(&dotCount), 4);
+    for (const auto& d : sPlacedDots)
+        out.write(reinterpret_cast<const char*>(&d), sizeof(glm::vec3));
+
+    // Write lines
+    uint32_t lineCount = (uint32_t)sPlacedLines.size();
+    out.write(reinterpret_cast<const char*>(&lineCount), 4);
+    for (const auto& l : sPlacedLines) {
+        out.write(reinterpret_cast<const char*>(&l.dotA), 4);
+        out.write(reinterpret_cast<const char*>(&l.dotB), 4);
+    }
+
+    // Write triangles
+    uint32_t triCount = (uint32_t)sPlacedTriangles.size();
+    out.write(reinterpret_cast<const char*>(&triCount), 4);
+    for (const auto& t : sPlacedTriangles) {
+        out.write(reinterpret_cast<const char*>(&t.dotA), 4);
+        out.write(reinterpret_cast<const char*>(&t.dotB), 4);
+        out.write(reinterpret_cast<const char*>(&t.dotC), 4);
+        uint8_t flipped = t.flipped ? 1 : 0;
+        out.write(reinterpret_cast<const char*>(&flipped), 1);
+    }
+}
+
+static void loadVectorMesh(const std::string& name) {
+    sVMeshName = name;
+    sPlacedDots.clear();
+    sPlacedLines.clear();
+    sPlacedTriangles.clear();
+
+    std::string path = "assets/saves/vectorMeshes/" + name + ".vmesh";
+    std::ifstream in(path, std::ios::binary);
+    if (!in) return; // new file, start empty
+
+    // Read dots
+    uint32_t dotCount = 0;
+    in.read(reinterpret_cast<char*>(&dotCount), 4);
+    sPlacedDots.resize(dotCount);
+    for (uint32_t i = 0; i < dotCount; i++)
+        in.read(reinterpret_cast<char*>(&sPlacedDots[i]), sizeof(glm::vec3));
+
+    // Read lines
+    uint32_t lineCount = 0;
+    in.read(reinterpret_cast<char*>(&lineCount), 4);
+    sPlacedLines.resize(lineCount);
+    for (uint32_t i = 0; i < lineCount; i++) {
+        in.read(reinterpret_cast<char*>(&sPlacedLines[i].dotA), 4);
+        in.read(reinterpret_cast<char*>(&sPlacedLines[i].dotB), 4);
+    }
+
+    // Read triangles
+    uint32_t triCount = 0;
+    in.read(reinterpret_cast<char*>(&triCount), 4);
+    sPlacedTriangles.resize(triCount);
+    for (uint32_t i = 0; i < triCount; i++) {
+        in.read(reinterpret_cast<char*>(&sPlacedTriangles[i].dotA), 4);
+        in.read(reinterpret_cast<char*>(&sPlacedTriangles[i].dotB), 4);
+        in.read(reinterpret_cast<char*>(&sPlacedTriangles[i].dotC), 4);
+        uint8_t flipped = 0;
+        in.read(reinterpret_cast<char*>(&flipped), 1);
+        sPlacedTriangles[i].flipped = (flipped != 0);
+    }
+}
+
+static void openVMeshPauseMenu() {
+    sVMeshPaused = true;
+
+    Camera* cam = getGlobalCamera();
+    if (cam->looking) {
+        cam->looking = false;
+        glfwSetInputMode(ctx.window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+    }
+
+    addUIGroup("vmesh_pause");
+
+    float btnW = 0.3f;
+    float btnH = 0.08f;
+    float btnX = -btnW / 2.0f;
+    glm::vec4 btnColor = {0.15f, 0.15f, 0.15f, 0.95f};
+
+    addToGroup("vmesh_pause", createButton("vm_continue",
+        btnX, 0.1f, btnW, btnH, btnColor, "Continue",
+        []() {
+            sVMeshPaused = false;
+            VE::setBrightness(1.0f);
+            removeUIGroup("vmesh_pause");
+        }
+    ));
+
+    addToGroup("vmesh_pause", createButton("vm_save",
+        btnX, -0.02f, btnW, btnH,
+        {0.1f, 0.4f, 0.15f, 0.95f}, "Save Model",
+        []() {
+            saveVectorMesh();
+
+            // Export as .mesh-compatible data: convert triangles to vertex/index arrays
+            // This writes a simple mesh file that can be loaded as a block type
+            if (!sVMeshName.empty() && !sPlacedTriangles.empty()) {
+                std::string meshPath = "assets/saves/vectorMeshes/" + sVMeshName + ".mesh";
+                std::ofstream out(meshPath, std::ios::binary);
+                if (out) {
+                    // Build vertex/index data with normals from placed triangles
+                    // Format: pos3 + uv2 + normal3 = 8 floats per vertex
+                    std::vector<float> verts;
+                    std::vector<unsigned int> indices;
+                    for (const auto& t : sPlacedTriangles) {
+                        if (t.dotA < (int)sPlacedDots.size() && t.dotB < (int)sPlacedDots.size() &&
+                            t.dotC < (int)sPlacedDots.size()) {
+
+                            glm::vec3 va = sPlacedDots[t.dotA];
+                            glm::vec3 vb = sPlacedDots[t.dotB];
+                            glm::vec3 vc = sPlacedDots[t.dotC];
+
+                            // Match renderer winding exactly
+                            glm::vec3 center = (va + vb + vc) / 3.0f;
+                            glm::vec3 normal = glm::cross(vb - va, vc - va);
+                            if (glm::length(center + normal) < glm::length(center)) {
+                                std::swap(vb, vc);
+                                normal = -normal;
+                            }
+                            if (t.flipped) {
+                                std::swap(vb, vc);
+                                normal = -normal;
+                            }
+                            normal = glm::normalize(-normal); // flip for correct lighting
+
+                            unsigned int base = (unsigned int)(verts.size() / 8);
+                            auto addVert = [&](const glm::vec3& p, const glm::vec3& n) {
+                                verts.push_back(p.x); verts.push_back(p.y); verts.push_back(p.z);
+                                verts.push_back(0.0f); verts.push_back(0.0f); // uv
+                                verts.push_back(n.x); verts.push_back(n.y); verts.push_back(n.z);
+                            };
+
+                            addVert(va, normal); addVert(vb, normal); addVert(vc, normal);
+                            indices.push_back(base); indices.push_back(base+1); indices.push_back(base+2);
+                        }
+                    }
+
+                    // Write with magic "VN" to indicate normals included
+                    uint32_t vertCount = (uint32_t)(verts.size() / 8);
+                    uint32_t idxCount = (uint32_t)indices.size();
+                    uint32_t texPathLen = 0;
+                    char magic[2] = {'V', 'N'};
+                    out.write(magic, 2);
+                    out.write(reinterpret_cast<const char*>(&vertCount), 4);
+                    out.write(reinterpret_cast<const char*>(&idxCount), 4);
+                    out.write(reinterpret_cast<const char*>(&texPathLen), 4);
+                    out.write(reinterpret_cast<const char*>(verts.data()), verts.size() * sizeof(float));
+                    out.write(reinterpret_cast<const char*>(indices.data()), indices.size() * sizeof(uint32_t));
+                }
+            }
+
+            sVMeshPaused = false;
+            VE::setBrightness(1.0f);
+            removeUIGroup("vmesh_pause");
+        }
+    ));
+
+    addToGroup("vmesh_pause", createButton("vm_exit",
+        btnX, -0.14f, btnW, btnH,
+        {0.3f, 0.1f, 0.1f, 0.9f}, "Exit",
+        []() {
+            sVMeshPaused = false;
+            VE::setBrightness(1.0f);
+            removeUIGroup("vmesh_pause");
+            if (!sReturnModelName.empty())
+                VE::setScene("3dModeler", new std::string(sReturnModelName));
+            else
+                VE::setScene("menu");
+        }
+    ));
+}
 
 // Build all snap points from edges, deduplicating corners
 static std::vector<glm::vec3> buildSnapPoints(int snapCount) {
@@ -212,7 +405,23 @@ void registerVectorMeshScene() {
             VE::setGradientBackground(true);
             sDrawMode = -1;
             sPlacedDots.clear();
+            sPlacedLines.clear();
+            sPlacedTriangles.clear();
             sWasLeftDown = false;
+            sVMeshPaused = false;
+            sVMeshWasEscDown = false;
+
+            sReturnSlot = -1;
+            sReturnModelName = "";
+
+            // Load vector mesh if data was passed
+            if (data) {
+                auto* editData = static_cast<VectorMeshEditData*>(data);
+                loadVectorMesh(editData->meshName);
+                sReturnSlot = editData->slotIndex;
+                sReturnModelName = editData->modelName;
+                delete editData;
+            }
 
             // Right sidebar
             addUIGroup("sidebar");
@@ -253,6 +462,7 @@ void registerVectorMeshScene() {
             cleanupLineRenderer();
             cleanupDotRenderer();
             cleanupOverlay();
+            VE::setBrightness(1.0f);
             VE::setGradientBackground(false);
             cleanupTextRenderer();
             cleanupUIRenderer();
@@ -260,7 +470,22 @@ void registerVectorMeshScene() {
         },
         // onInput
         [](float dt) {
+            // Esc toggle pause menu
+            bool escDown = glfwGetKey(ctx.window, GLFW_KEY_ESCAPE) == GLFW_PRESS;
+            if (escDown && !sVMeshWasEscDown) {
+                if (sVMeshPaused) {
+                    sVMeshPaused = false;
+                    VE::setBrightness(1.0f);
+                    removeUIGroup("vmesh_pause");
+                } else {
+                    openVMeshPauseMenu();
+                }
+            }
+            sVMeshWasEscDown = escDown;
+
             processUIInput();
+
+            if (sVMeshPaused) return;
 
             if (!getGlobalCamera()->looking) {
                 double mx, my;
@@ -513,6 +738,9 @@ void registerVectorMeshScene() {
         nullptr,
         // onRender
         []() {
+            if (sVMeshPaused)
+                VE::setBrightness(0.5f);
+
             if (!sHideOutlines) {
                 // Draw 12 edges
                 glm::vec3 lineColor(1.0f, 1.0f, 1.0f);

@@ -11,6 +11,10 @@
 
 EngineContext ctx;
 
+static void scrollCallback(GLFWwindow*, double xoffset, double yoffset) {
+    ctx.scrollDelta += (float)yoffset;
+}
+
 static void framebufferSizeCallback(GLFWwindow*, int width, int height) {
     glViewport(0, 0, width, height);
     ctx.width = width;
@@ -43,6 +47,7 @@ bool initWindow(int width, int height, const char* title, bool maximized) {
 
     glfwSetFramebufferSizeCallback(ctx.window, framebufferSizeCallback);
     glfwSetCursorPosCallback(ctx.window, Camera::mouseCallback);
+    glfwSetScrollCallback(ctx.window, scrollCallback);
     glfwSetInputMode(ctx.window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
 
     if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress)) {
@@ -95,11 +100,14 @@ void setMode(MeshMode mode) {
 }
 
 void draw(const char* meshName, float x, float y, float z) {
+    // Remove any existing collider at this position (e.g. ghost block)
+    removeCollider(x, y, z);
     addDrawInstance(meshName, x, y, z);
     const RegisteredMesh* reg = getRegisteredMesh(meshName);
     if (reg)
         addCollider(meshName, reg->vertices.data(), reg->vertexCount,
-                    reg->indices.data(), reg->indexCount, reg->rectangular, x, y, z);
+                    reg->indices.data(), reg->indexCount, reg->rectangular, x, y, z,
+                    reg->floatsPerVertex);
     ctx.needsRebuild = true;
 }
 

@@ -9,6 +9,9 @@
 #include <algorithm>
 #include <cmath>
 
+// Current mesh for placing/replacing blocks
+static std::string sCurrentMesh = "cube";
+
 // Drag state
 static bool sDragging = false;
 static bool sWasRightDown = false;
@@ -24,6 +27,42 @@ static const glm::ivec3 sFaceNormals[6] = {
     { 0, 1, 0}, { 0,-1, 0},
     { 0, 0, 1}, { 0, 0,-1},
 };
+
+// Get extrude direction from a selected face
+// For rectangular (cube) colliders: uses the 6-face lookup
+// For non-rectangular: computes from the triangle's actual normal
+static glm::ivec3 getExtrudeDirection(const SelectedFace& sel) {
+    const BlockCollider* col = getColliderAt(sel.blockPos.x, sel.blockPos.y, sel.blockPos.z);
+    if (!col) return glm::ivec3(0);
+
+    if ((col->isRectangular || isForceRectangularRaycast()) && sel.faceIndex >= 0 && sel.faceIndex < 6) {
+        return sFaceNormals[sel.faceIndex];
+    }
+
+    // Non-rectangular: get triangle normal and snap to nearest axis
+    if (sel.faceIndex >= 0 && sel.faceIndex < (int)col->triangles.size()) {
+        const Triangle& tri = col->triangles[sel.faceIndex];
+        glm::vec3 edge1 = tri.v1 - tri.v0;
+        glm::vec3 edge2 = tri.v2 - tri.v0;
+        glm::vec3 normal = glm::normalize(glm::cross(edge1, edge2));
+
+        // Snap to nearest axis direction
+        glm::ivec3 dir(0);
+        int bestAxis = 0;
+        float bestDot = 0.0f;
+        for (int a = 0; a < 3; a++) {
+            float d = std::abs(normal[a]);
+            if (d > bestDot) {
+                bestDot = d;
+                bestAxis = a;
+            }
+        }
+        dir[bestAxis] = (normal[bestAxis] > 0.0f) ? 1 : -1;
+        return dir;
+    }
+
+    return glm::ivec3(0, 1, 0); // fallback: up
+}
 
 static void getFacePlaneAxes(int faceIndex, int& axisA, int& axisB) {
     switch (faceIndex / 2) {
@@ -47,6 +86,14 @@ static void drawFaceOverlay(const glm::ivec3& blockPos, int faceIndex,
     Triangle t1 = aabbFaceTriangle(col->bounds, faceIndex, 1);
     drawTriangleOverlay(*ctx.shader, t0, color, alpha);
     drawTriangleOverlay(*ctx.shader, t1, color, alpha);
+}
+
+void setCurrentMesh(const std::string& meshName) {
+    sCurrentMesh = meshName;
+}
+
+const std::string& getCurrentMesh() {
+    return sCurrentMesh;
 }
 
 static void drawBlockHighlight(const glm::ivec3& pos, const glm::vec3& color, float alpha) {
@@ -163,32 +210,47 @@ void renderHoverHighlight() {
     }
     sWasDDown = dDown;
 
-    // Ctrl+A extrudes blocks from selected faces
+    // Ctrl+A: block select mode = replace blocks, face select mode = extrude
     bool aDown = glfwGetKey(ctx.window, GLFW_KEY_A) == GLFW_PRESS;
     if (aDown && !sWasADown && ctrlHeld && !getSelection().empty() && !rightDown) {
-        std::vector<SelectedFace> newFaces;
-        for (const auto& sel : getSelection()) {
-            glm::ivec3 n = sFaceNormals[sel.faceIndex];
-            glm::ivec3 newPos = sel.blockPos + n;
+        if (sBlockSelectMode) {
+            // Replace: remove and re-place each selected block
+            std::vector<glm::ivec3> blocks;
+            for (const auto& sel : getSelection()) {
+                bool already = false;
+                for (const auto& b : blocks)
+                    if (b == sel.blockPos) { already = true; break; }
+                if (!already) blocks.push_back(sel.blockPos);
+            }
 
-            if (VE::hasBlockAt(newPos.x, newPos.y, newPos.z))
-                continue;
+            for (const auto& pos : blocks) {
+                VE::undraw((float)pos.x, (float)pos.y, (float)pos.z);
+                VE::draw(sCurrentMesh.c_str(), (float)pos.x, (float)pos.y, (float)pos.z);
+            }
+            clearSelection();
+            sBlockSelectMode = false;
+        } else {
+            // Extrude from selected faces
+            std::vector<SelectedFace> newFaces;
+            for (const auto& sel : getSelection()) {
+                glm::ivec3 n = getExtrudeDirection(sel);
+                glm::ivec3 newPos = sel.blockPos + n;
 
-            const BlockCollider* col = getColliderAt(sel.blockPos.x, sel.blockPos.y, sel.blockPos.z);
-            if (!col) continue;
+                if (VE::hasBlockAt(newPos.x, newPos.y, newPos.z))
+                    continue;
 
-            VE::draw(col->meshName.c_str(), (float)newPos.x, (float)newPos.y, (float)newPos.z);
-            newFaces.push_back({newPos, sel.faceIndex});
+                VE::draw(sCurrentMesh.c_str(), (float)newPos.x, (float)newPos.y, (float)newPos.z);
+                newFaces.push_back({newPos, sel.faceIndex});
+            }
+            clearSelection();
+            for (const auto& f : newFaces)
+                addSelectedFace(f.blockPos, f.faceIndex);
         }
-        // Move selection to the new layer's outward faces
-        clearSelection();
-        for (const auto& f : newFaces)
-            addSelectedFace(f.blockPos, f.faceIndex);
     }
     sWasADown = aDown;
 
     // Start drag
-    if (rightJustPressed && hit.hit && hit.collider && hit.collider->isRectangular) {
+    if (rightJustPressed && hit.hit && hit.collider && (hit.collider->isRectangular || isForceRectangularRaycast())) {
         sDragging = true;
         sStartBlock = glm::ivec3(glm::round(hit.collider->position));
         sStartFace = hit.triangleIndex;
@@ -198,7 +260,7 @@ void renderHoverHighlight() {
 
     // Commit selection on release
     if (rightJustReleased && sDragging) {
-        if (hit.hit && hit.collider && hit.collider->isRectangular) {
+        if (hit.hit && hit.collider && (hit.collider->isRectangular || isForceRectangularRaycast())) {
             glm::ivec3 endBlock = glm::ivec3(glm::round(hit.collider->position));
             std::vector<SelectedFace> faces;
             collectRectangleFaces(sStartBlock, endBlock, sStartFace, faces);
@@ -214,7 +276,7 @@ void renderHoverHighlight() {
     }
 
     // Draw drag preview while dragging (light blue = add, red = remove)
-    if (sDragging && hit.hit && hit.collider && hit.collider->isRectangular) {
+    if (sDragging && hit.hit && hit.collider && (hit.collider->isRectangular || isForceRectangularRaycast())) {
         glm::ivec3 currentBlock = glm::ivec3(glm::round(hit.collider->position));
         std::vector<SelectedFace> preview;
         collectRectangleFaces(sStartBlock, currentBlock, sStartFace, preview);
@@ -229,7 +291,7 @@ void renderHoverHighlight() {
         return;
 
     glm::vec3 yellow(1.0f, 1.0f, 0.0f);
-    if (hit.collider->isRectangular) {
+    if ((hit.collider->isRectangular || isForceRectangularRaycast())) {
         drawFaceOverlay(glm::ivec3(glm::round(hit.collider->position)), hit.triangleIndex, yellow, 0.45f);
     } else if (hit.triangleIndex < (int)hit.collider->triangles.size()) {
         drawTriangleOverlay(*ctx.shader, hit.collider->triangles[hit.triangleIndex], yellow, 0.45f);

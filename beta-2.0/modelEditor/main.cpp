@@ -9,7 +9,7 @@ int main() {
     VE::setMode(VE::SINGLE);
 
     registerScenes();
-    VE::setScene("vectorMesh");
+    VE::setScene("menu");
     VE::run();
     return 0;
 }
