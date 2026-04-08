@@ -338,29 +338,9 @@ void register3dModelerScene() {
                     for (int i = 0; i < (int)sCurrentModel.blockTypes.size(); i++) {
                         const BlockTypeDef& bt = sCurrentModel.blockTypes[i];
                         if (bt.floatsPerVertex == 8) {
-                            // Register with pre-computed normals
-                            RegisteredMesh reg;
-                            reg.vertices = bt.vertices;
-                            reg.vertexCount = bt.vertexCount;
-                            reg.floatsPerVertex = 8;
-                            reg.indices = bt.indices;
-                            reg.indexCount = bt.indexCount;
-                            reg.rectangular = false;
-                            // Use the internal registration
-                            VE::MeshDef def;
-                            def.vertices = const_cast<float*>(bt.vertices.data());
-                            def.vertexCount = bt.vertexCount;
-                            def.indices = const_cast<unsigned int*>(bt.indices.data());
-                            def.indexCount = bt.indexCount;
-                            def.texturePath = nullptr;
-                            VE::loadMesh(bt.name.c_str(), def);
-                            // Override with 8-float data
-                            auto* regPtr = const_cast<RegisteredMesh*>(getRegisteredMesh(bt.name.c_str()));
-                            if (regPtr) {
-                                regPtr->vertices = bt.vertices;
-                                regPtr->floatsPerVertex = 8;
-                                regPtr->rectangular = false;
-                            }
+                            // VN mesh: load directly from .mesh file
+                            std::string meshPath = "assets/saves/vectorMeshes/" + bt.name + ".mesh";
+                            VE::loadMesh(bt.name.c_str(), meshPath.c_str());
                         } else {
                             VE::MeshDef def;
                             def.vertices = const_cast<float*>(bt.vertices.data());

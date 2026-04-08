@@ -13,6 +13,7 @@
 #include "../../../VisualEngine/uiManagement/TextRenderer.h"
 #include "../../../VisualEngine/uiManagement/EmbeddedFont.h"
 #include "SceneData.h"
+#include "../../../VisualEngine/renderingManagement/ChunkMesh.h"
 #include "../../../VisualEngine/memoryManagement/memory.h"
 #include <vector>
 #include <string>
@@ -194,18 +195,13 @@ static void openVMeshPauseMenu() {
                             glm::vec3 vb = sPlacedDots[t.dotB];
                             glm::vec3 vc = sPlacedDots[t.dotC];
 
-                            // Match renderer winding exactly
-                            glm::vec3 center = (va + vb + vc) / 3.0f;
+                            // Flip normal for correct lighting when loaded
                             glm::vec3 normal = glm::cross(vb - va, vc - va);
-                            if (glm::length(center + normal) < glm::length(center)) {
-                                std::swap(vb, vc);
-                                normal = -normal;
-                            }
                             if (t.flipped) {
                                 std::swap(vb, vc);
                                 normal = -normal;
                             }
-                            normal = glm::normalize(-normal); // flip for correct lighting
+                            normal = glm::normalize(-normal);
 
                             unsigned int base = (unsigned int)(verts.size() / 8);
                             auto addVert = [&](const glm::vec3& p, const glm::vec3& n) {
