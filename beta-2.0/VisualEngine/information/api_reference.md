@@ -22,8 +22,8 @@
 `VE::setMode(mode)`
   Sets mesh build mode. SINGLE = one merged mesh with face culling. CHUNK = reserved for future chunked meshing.
 
-`VE::draw(meshName, x, y, z)`
-  Places a named mesh at a world position. Also creates a collider for it.
+`VE::draw(meshName, x, y, z, rx = 0, ry = 0, rz = 0)`
+  Places a named mesh at a world position with optional rotation in degrees. Rotation is applied around the mesh's local origin before translation. Also creates a collider (rotated colliders use triangle-based raycasting).
 
 `VE::undraw(x, y, z)`
   Removes the mesh and collider at a world position.
@@ -83,6 +83,10 @@
 
 `Texture(filepath)`
   Loads an image via stb_image and creates a GL texture.
+
+`Texture(pixels, width, height, channels)`
+  Creates a GL texture from raw pixel data (NEAREST filtering, CLAMP_TO_EDGE).
+
   `texture.bind(unit)` — binds to a texture unit.
 
 `Mesh(vertices, vertexCount, indices, indexCount)`
@@ -126,8 +130,8 @@
 `getRegisteredMesh(name) -> RegisteredMesh*`
   Looks up a registered mesh by name.
 
-`addDrawInstance(meshName, x, y, z)`
-  Adds a draw instance to the draw list.
+`addDrawInstance(meshName, x, y, z, rx = 0, ry = 0, rz = 0)`
+  Adds a draw instance to the draw list with optional rotation in degrees.
 
 `removeDrawInstance(x, y, z)`
   Removes the draw instance at a position.
@@ -136,7 +140,7 @@
   Clears all draw instances.
 
 `buildSingleMeshes() -> vector<MergedMeshEntry>`
-  Merges all instances of each mesh type into one draw call with neighbor-based face culling. Adjacent faces between blocks are removed.
+  Merges all instances of each mesh type into one draw call with neighbor-based face culling. Adjacent faces between blocks are removed. Vertices are rotated per-instance. Painted triangles are split into separate per-color meshes with objectColor set. Face culling is skipped for rotated instances.
 
 `buildMergedMeshes() -> vector<MergedMeshEntry>`
   Placeholder for future chunk-based meshing. Currently forwards to buildSingleMeshes.
@@ -149,6 +153,9 @@
 
 `setMeshSolidFaces(name, faces[6])`
   Manually sets which face directions are solid for culling.
+
+`setPaintPalette(palette[8])`
+  Sets the 8-color paint palette. Creates/updates a palette texture used for per-face coloring. Painted triangles are rendered as separate color-batched meshes using objectColor.
 
 `RegisteredMesh.floatsPerVertex`
   5 = pos3+uv2 (normals computed), 8 = pos3+uv2+normal3 (pre-computed normals).
@@ -170,8 +177,8 @@
 `AABB { min, max }`
   Axis-aligned bounding box.
 
-`BlockCollider { position, bounds, triangles, meshName, isRectangular }`
-  A collider placed in the world. Rectangular colliders use AABB-only raycasting. Non-rectangular store individual triangles.
+`BlockCollider { position, rotation, bounds, triangles, meshName, isRectangular, triColors }`
+  A collider placed in the world. Rectangular colliders use AABB-only raycasting (disabled when rotated). Non-rectangular store individual triangles. triColors stores per-face/triangle paint palette indices (-1 = unpainted).
 
 `CollisionHit { hit, point, normal, distance, collider, triangleIndex }`
   Result of a raycast. triangleIndex is an index into collider->triangles (mesh) or a face index 0-5 (AABB).
@@ -179,8 +186,8 @@
 `isMeshRectangular(vertices, vertexCount) -> bool`
   Returns true if all vertices lie on the faces of their bounding box.
 
-`addCollider(meshName, vertices, vertexCount, indices, indexCount, rectangular, x, y, z, floatsPerVertex = 5)`
-  Creates a collider at a world position. Supports 5-float (pos+uv) or 8-float (pos+uv+normal) vertex stride.
+`addCollider(meshName, vertices, vertexCount, indices, indexCount, rectangular, x, y, z, floatsPerVertex = 5, rx = 0, ry = 0, rz = 0)`
+  Creates a collider at a world position with optional rotation. Supports 5-float (pos+uv) or 8-float (pos+uv+normal) vertex stride. Rotated rectangular meshes fall back to triangle collision. Initializes triColors with -1 (unpainted).
 
 `removeCollider(x, y, z)`
   Removes the collider at a position.
@@ -329,17 +336,17 @@ rz -> 3
 `BlockTypeDef { name, vertices, vertexCount, floatsPerVertex, indices, indexCount, faceColors }`
   Defines a custom block shape with per-triangle colors. floatsPerVertex = 5 (pos+uv) or 8 (pos+uv+normal).
 
-`BlockPlacement { x, y, z, typeId, rx, ry, rz }`
-  A placed block: position, which block type, rotation.
+`BlockPlacement { x, y, z, typeId, rx, ry, rz, triColors }`
+  A placed block: position, which block type, rotation, and per-face/triangle paint palette indices.
 
-`ModelFile { blockTypes, placements }`
-  Complete model file containing block type definitions and all placements.
+`ModelFile { blockTypes, placements, palette[8] }`
+  Complete model file containing block type definitions, all placements, and an 8-color paint palette.
 
 `saveModel(name, model) -> bool`
-  Saves a ModelFile to `{memoryPath}/{name}.mdl`. Version 2 format with magic header, floatsPerVertex per block type, block types section (vertices, indices, face colors), and placements section.
+  Saves a ModelFile to `{memoryPath}/{name}.mdl`. Version 3 format with magic header, floatsPerVertex per block type, block types section (vertices, indices, face colors), placements section (with triColors), and palette.
 
 `loadModel(name, model) -> bool`
-  Loads a `.mdl` file back into a ModelFile struct. Supports v1 (5-float) and v2 (variable floatsPerVertex).
+  Loads a `.mdl` file back into a ModelFile struct. Supports v1 (5-float), v2 (variable floatsPerVertex), and v3 (triColors + palette).
 
 ### Mesh File Formats
 
@@ -368,6 +375,9 @@ rz -> 3
 
 `drawUIElement(element)`
   Draws a single UI element as a colored/textured quad. Disables depth test, enables blending.
+
+`getUIShader() -> Shader*`
+  Returns the UI shader for custom UI drawing (e.g. color wheel triangles).
 
 **Header:** `VisualEngine/uiManagement/UIManager.h`
 **Implementation:** `VisualEngine/uiManagement/UIManager.cpp`
