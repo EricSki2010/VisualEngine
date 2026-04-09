@@ -15,10 +15,12 @@ struct AABB {
 
 struct BlockCollider {
     glm::vec3 position;
+    glm::vec3 rotation;               // degrees (rx, ry, rz)
     AABB bounds;
     std::vector<Triangle> triangles;  // empty for rectangular meshes (uses AABB only)
     std::string meshName;
     bool isRectangular;               // true = AABB-only, false = triangle-level
+    std::vector<int8_t> triColors;    // palette index per triangle (-1 = unpainted)
 };
 
 struct CollisionHit {
@@ -35,7 +37,8 @@ bool isMeshRectangular(const float* vertices, int vertexCount);
 
 void addCollider(const char* meshName, const float* vertices, int vertexCount,
                  const unsigned int* indices, int indexCount,
-                 bool rectangular, float x, float y, float z, int floatsPerVertex = 5);
+                 bool rectangular, float x, float y, float z, int floatsPerVertex = 5,
+                 float rx = 0.0f, float ry = 0.0f, float rz = 0.0f);
 void removeCollider(float x, float y, float z);
 void clearColliders();
 bool hasColliderAt(int x, int y, int z);

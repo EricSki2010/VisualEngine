@@ -26,7 +26,8 @@ void loadMesh(const char* name, const MeshDef& def);
 void loadMesh(const char* name, const char* meshFilePath);
 void loadMeshDir(const char* dirPath);
 void setMode(MeshMode mode);
-void draw(const char* meshName, float x, float y, float z);
+void draw(const char* meshName, float x, float y, float z,
+          float rx = 0.0f, float ry = 0.0f, float rz = 0.0f);
 void undraw(float x, float y, float z);
 void clearDraws();
 void rebuild();

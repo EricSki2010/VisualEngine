@@ -50,6 +50,7 @@ public:
 
     Texture(const char* filepath);
     Texture(const unsigned char* data, int dataSize);
+    Texture(const unsigned char* pixels, int width, int height, int channels);
     ~Texture();
     Texture(const Texture&) = delete;
     Texture& operator=(const Texture&) = delete;

@@ -1,8 +1,19 @@
 #include "Collision.h"
+#include <glm/gtc/matrix_transform.hpp>
 #include <cmath>
 #include <algorithm>
 #include <limits>
 #include <unordered_map>
+
+static glm::vec3 rotatePoint(const glm::vec3& v, float rx, float ry, float rz) {
+    if (rx == 0.0f && ry == 0.0f && rz == 0.0f)
+        return v;
+    glm::mat4 m(1.0f);
+    m = glm::rotate(m, glm::radians(rx), glm::vec3(1, 0, 0));
+    m = glm::rotate(m, glm::radians(ry), glm::vec3(0, 1, 0));
+    m = glm::rotate(m, glm::radians(rz), glm::vec3(0, 0, 1));
+    return glm::vec3(m * glm::vec4(v, 1.0f));
+}
 
 // ── Spatial hash for O(1) grid lookups ──────────────────────────────
 
@@ -59,33 +70,42 @@ bool isMeshRectangular(const float* vertices, int vertexCount) {
 
 void addCollider(const char* meshName, const float* vertices, int vertexCount,
                  const unsigned int* indices, int indexCount,
-                 bool rectangular, float x, float y, float z, int floatsPerVertex) {
+                 bool rectangular, float x, float y, float z, int floatsPerVertex,
+                 float rx, float ry, float rz) {
     int fpv = floatsPerVertex;
+    bool hasRot = (rx != 0.0f || ry != 0.0f || rz != 0.0f);
     BlockCollider col;
     col.position = glm::vec3(x, y, z);
+    col.rotation = glm::vec3(rx, ry, rz);
     col.meshName = meshName;
-    col.isRectangular = rectangular;
+    col.isRectangular = rectangular && !hasRot; // rotated boxes use triangle collision
 
     col.bounds.min = glm::vec3(std::numeric_limits<float>::max());
     col.bounds.max = glm::vec3(std::numeric_limits<float>::lowest());
     for (int i = 0; i < vertexCount; i++) {
-        float vx = vertices[i * fpv + 0] + x;
-        float vy = vertices[i * fpv + 1] + y;
-        float vz = vertices[i * fpv + 2] + z;
-        col.bounds.min = glm::min(col.bounds.min, glm::vec3(vx, vy, vz));
-        col.bounds.max = glm::max(col.bounds.max, glm::vec3(vx, vy, vz));
+        glm::vec3 local(vertices[i * fpv + 0], vertices[i * fpv + 1], vertices[i * fpv + 2]);
+        glm::vec3 world = rotatePoint(local, rx, ry, rz) + glm::vec3(x, y, z);
+        col.bounds.min = glm::min(col.bounds.min, world);
+        col.bounds.max = glm::max(col.bounds.max, world);
     }
 
-    if (!rectangular) {
+    if (!col.isRectangular) {
         for (int i = 0; i < indexCount; i += 3) {
             unsigned int i0 = indices[i], i1 = indices[i + 1], i2 = indices[i + 2];
+            glm::vec3 v0(vertices[i0 * fpv + 0], vertices[i0 * fpv + 1], vertices[i0 * fpv + 2]);
+            glm::vec3 v1(vertices[i1 * fpv + 0], vertices[i1 * fpv + 1], vertices[i1 * fpv + 2]);
+            glm::vec3 v2(vertices[i2 * fpv + 0], vertices[i2 * fpv + 1], vertices[i2 * fpv + 2]);
             Triangle tri;
-            tri.v0 = glm::vec3(vertices[i0 * fpv + 0] + x, vertices[i0 * fpv + 1] + y, vertices[i0 * fpv + 2] + z);
-            tri.v1 = glm::vec3(vertices[i1 * fpv + 0] + x, vertices[i1 * fpv + 1] + y, vertices[i1 * fpv + 2] + z);
-            tri.v2 = glm::vec3(vertices[i2 * fpv + 0] + x, vertices[i2 * fpv + 1] + y, vertices[i2 * fpv + 2] + z);
+            tri.v0 = rotatePoint(v0, rx, ry, rz) + glm::vec3(x, y, z);
+            tri.v1 = rotatePoint(v1, rx, ry, rz) + glm::vec3(x, y, z);
+            tri.v2 = rotatePoint(v2, rx, ry, rz) + glm::vec3(x, y, z);
             col.triangles.push_back(tri);
         }
     }
+
+    // Initialize triColors: 6 for rectangular (per face), triCount for non-rectangular
+    int triCount = col.isRectangular ? 6 : (indexCount / 3);
+    col.triColors.assign(triCount, -1);
 
     size_t idx = gColliders.size();
     gColliders.push_back(std::move(col));

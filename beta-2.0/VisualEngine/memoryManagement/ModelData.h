@@ -22,9 +22,14 @@ struct BlockPlacement {
     int x, y, z;
     int typeId;
     int rx, ry, rz;
+    std::vector<int8_t> triColors; // palette index per triangle (-1 = unpainted)
 };
 
 struct ModelFile {
     std::vector<BlockTypeDef> blockTypes;
     std::vector<BlockPlacement> placements;
+    glm::vec3 palette[8] = {
+        {0.6f, 0.6f, 0.6f}, {0.6f, 0.6f, 0.6f}, {0.6f, 0.6f, 0.6f}, {0.6f, 0.6f, 0.6f},
+        {0.6f, 0.6f, 0.6f}, {0.6f, 0.6f, 0.6f}, {0.6f, 0.6f, 0.6f}, {0.6f, 0.6f, 0.6f},
+    };
 };

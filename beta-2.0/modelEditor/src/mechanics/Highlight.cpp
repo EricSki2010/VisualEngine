@@ -1,5 +1,6 @@
 #include "Highlight.h"
 #include "Selection.h"
+#include "../scenes/3dModeler.h"
 #include "../../../VisualEngine/EngineGlobals.h"
 #include "../../../VisualEngine/inputManagement/Raycasting.h"
 #include "../../../VisualEngine/inputManagement/Collision.h"
@@ -8,6 +9,7 @@
 #include "../../../VisualEngine/inputManagement/Camera.h"
 #include <algorithm>
 #include <cmath>
+#include <iostream>
 
 // Current mesh for placing/replacing blocks
 static std::string sCurrentMesh = "cube";
@@ -18,9 +20,49 @@ static bool sWasRightDown = false;
 static bool sWasTabDown = false;
 static bool sWasDDown = false;
 static bool sWasADown = false;
+static bool sWas1Down = false;
+static bool sWas2Down = false;
+static bool sWas3Down = false;
 static bool sBlockSelectMode = false;
 static glm::ivec3 sStartBlock;
 static int sStartFace = -1;
+
+// Paint mode drag state
+static bool sPaintDragging = false;
+static bool sWasLeftDown = false;
+static glm::vec3 sPaintStartNormal;
+static float sPaintStartPlane;  // dot(normal, point) for coplanarity check
+static std::vector<SelectedFace> sPaintPreview;
+
+static glm::vec3 getHitNormal(const BlockCollider* col, int triIndex) {
+    if (col->isRectangular && triIndex >= 0 && triIndex < 6) {
+        static const glm::vec3 normals[6] = {
+            {1,0,0}, {-1,0,0}, {0,1,0}, {0,-1,0}, {0,0,1}, {0,0,-1}
+        };
+        return normals[triIndex];
+    }
+    if (triIndex >= 0 && triIndex < (int)col->triangles.size()) {
+        const Triangle& t = col->triangles[triIndex];
+        return glm::normalize(glm::cross(t.v1 - t.v0, t.v2 - t.v0));
+    }
+    return glm::vec3(0, 1, 0);
+}
+
+static glm::vec3 getHitCenter(const BlockCollider* col, int triIndex) {
+    if (col->isRectangular && triIndex >= 0 && triIndex < 6) {
+        glm::vec3 center = (col->bounds.min + col->bounds.max) * 0.5f;
+        static const glm::vec3 normals[6] = {
+            {1,0,0}, {-1,0,0}, {0,1,0}, {0,-1,0}, {0,0,1}, {0,0,-1}
+        };
+        glm::vec3 half = (col->bounds.max - col->bounds.min) * 0.5f;
+        return center + normals[triIndex] * half;
+    }
+    if (triIndex >= 0 && triIndex < (int)col->triangles.size()) {
+        const Triangle& t = col->triangles[triIndex];
+        return (t.v0 + t.v1 + t.v2) / 3.0f;
+    }
+    return col->position;
+}
 
 static const glm::ivec3 sFaceNormals[6] = {
     { 1, 0, 0}, {-1, 0, 0},
@@ -157,6 +199,17 @@ void renderHoverHighlight() {
             drawnBlocks.push_back(sel.blockPos);
             drawBlockHighlight(sel.blockPos, purple, 0.45f);
         }
+    } else if (!isForceRectangularRaycast()) {
+        // Paint mode: highlight selected faces/triangles
+        glm::vec3 green(0.2f, 1.0f, 0.4f);
+        for (const auto& sel : getSelection()) {
+            const BlockCollider* col = getColliderAt(sel.blockPos.x, sel.blockPos.y, sel.blockPos.z);
+            if (!col) continue;
+            if (col->isRectangular)
+                drawFaceOverlay(sel.blockPos, sel.faceIndex, green, 0.45f);
+            else if (sel.faceIndex < (int)col->triangles.size())
+                drawTriangleOverlay(*ctx.shader, col->triangles[sel.faceIndex], green, 0.45f);
+        }
     } else {
         glm::vec3 blue(0.0f, 0.5f, 1.0f);
         for (const auto& sel : getSelection())
@@ -174,6 +227,10 @@ void renderHoverHighlight() {
 
     Ray ray = screenToRay(mx, my, ctx.width, ctx.height, ctx.scene->view, ctx.scene->projection);
     CollisionHit hit = raycast(ray.origin, ray.direction);
+
+    bool leftDown = glfwGetMouseButton(ctx.window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
+    bool leftJustPressed = leftDown && !sWasLeftDown;
+    sWasLeftDown = leftDown;
 
     bool rightDown = glfwGetMouseButton(ctx.window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS;
     bool rightJustPressed = rightDown && !sWasRightDown;
@@ -193,9 +250,9 @@ void renderHoverHighlight() {
     if (getSelection().empty())
         sBlockSelectMode = false;
 
-    // Ctrl+D deletes selected blocks
+    // Ctrl+D deletes selected blocks (build mode only)
     bool dDown = glfwGetKey(ctx.window, GLFW_KEY_D) == GLFW_PRESS;
-    if (dDown && !sWasDDown && ctrlHeld && !getSelection().empty()) {
+    if (dDown && !sWasDDown && ctrlHeld && !getSelection().empty() && isForceRectangularRaycast()) {
         std::vector<glm::ivec3> blocks;
         for (const auto& sel : getSelection()) {
             bool already = false;
@@ -210,9 +267,9 @@ void renderHoverHighlight() {
     }
     sWasDDown = dDown;
 
-    // Ctrl+A: block select mode = replace blocks, face select mode = extrude
+    // Ctrl+A: block select mode = replace blocks, face select mode = extrude (build mode only)
     bool aDown = glfwGetKey(ctx.window, GLFW_KEY_A) == GLFW_PRESS;
-    if (aDown && !sWasADown && ctrlHeld && !getSelection().empty() && !rightDown) {
+    if (aDown && !sWasADown && ctrlHeld && !getSelection().empty() && !rightDown && isForceRectangularRaycast()) {
         if (sBlockSelectMode) {
             // Replace: remove and re-place each selected block
             std::vector<glm::ivec3> blocks;
@@ -247,9 +304,128 @@ void renderHoverHighlight() {
                 addSelectedFace(f.blockPos, f.faceIndex);
         }
     }
+    // Ctrl+A in paint mode: color selected faces
+    if (aDown && !sWasADown && ctrlHeld && !getSelection().empty() && !isForceRectangularRaycast()) {
+        int colorIdx = getSelectedPaintColor();
+        if (colorIdx >= 0 && colorIdx < 8) {
+            for (const auto& sel : getSelection()) {
+                BlockCollider* col = const_cast<BlockCollider*>(
+                    getColliderAt(sel.blockPos.x, sel.blockPos.y, sel.blockPos.z));
+                if (col && sel.faceIndex >= 0 && sel.faceIndex < (int)col->triColors.size())
+                    col->triColors[sel.faceIndex] = (int8_t)colorIdx;
+            }
+            clearSelection();
+            ctx.needsRebuild = true;
+        }
+    }
     sWasADown = aDown;
 
-    // Start drag
+    // R + 1/2/3: rotate selected blocks by 45 degrees (block select mode only)
+    bool rHeld = glfwGetKey(ctx.window, GLFW_KEY_R) == GLFW_PRESS;
+    bool key1 = glfwGetKey(ctx.window, GLFW_KEY_1) == GLFW_PRESS;
+    bool key2 = glfwGetKey(ctx.window, GLFW_KEY_2) == GLFW_PRESS;
+    bool key3 = glfwGetKey(ctx.window, GLFW_KEY_3) == GLFW_PRESS;
+    if (rHeld && sBlockSelectMode && !getSelection().empty()) {
+        glm::vec3 addRot(0.0f);
+        bool doRotate = false;
+        if (key1 && !sWas1Down) { addRot.x = 45.0f; doRotate = true; }
+        if (key2 && !sWas2Down) { addRot.y = 45.0f; doRotate = true; }
+        if (key3 && !sWas3Down) { addRot.z = 45.0f; doRotate = true; }
+
+        if (doRotate) {
+            std::vector<glm::ivec3> blocks;
+            for (const auto& sel : getSelection()) {
+                bool already = false;
+                for (const auto& b : blocks)
+                    if (b == sel.blockPos) { already = true; break; }
+                if (!already) blocks.push_back(sel.blockPos);
+            }
+            for (const auto& pos : blocks) {
+                const BlockCollider* col = getColliderAt(pos.x, pos.y, pos.z);
+                if (!col) continue;
+                std::string mesh = col->meshName;
+                glm::vec3 rot = col->rotation + addRot;
+                VE::undraw((float)pos.x, (float)pos.y, (float)pos.z);
+                VE::draw(mesh.c_str(), (float)pos.x, (float)pos.y, (float)pos.z,
+                         rot.x, rot.y, rot.z);
+            }
+        }
+    }
+    sWas1Down = key1;
+    sWas2Down = key2;
+    sWas3Down = key3;
+
+    // Paint mode interactions
+    if (!isForceRectangularRaycast()) {
+        // Left-click drag: brush select (immediate, paints as you drag)
+        if (leftDown && hit.hit && hit.collider && hit.triangleIndex >= 0) {
+            if (leftJustPressed && !shiftHeld && !ctrlHeld)
+                clearSelection();
+            glm::ivec3 blockPos = glm::ivec3(glm::round(hit.collider->position));
+            if (ctrlHeld)
+                removeSelectedFace(blockPos, hit.triangleIndex);
+            else
+                addSelectedFace(blockPos, hit.triangleIndex);
+        }
+
+        // Right-click: single select
+        if (rightJustPressed && hit.hit && hit.collider && hit.triangleIndex >= 0) {
+            if (!shiftHeld && !ctrlHeld)
+                clearSelection();
+            // Start plane drag
+            sPaintDragging = true;
+            sPaintPreview.clear();
+            sPaintStartNormal = getHitNormal(hit.collider, hit.triangleIndex);
+            sPaintStartPlane = glm::dot(sPaintStartNormal, getHitCenter(hit.collider, hit.triangleIndex));
+        }
+
+        // Right-click drag: plane select (preview, commit on release)
+        if (sPaintDragging && rightDown && hit.hit && hit.collider && hit.triangleIndex >= 0) {
+            glm::ivec3 blockPos = glm::ivec3(glm::round(hit.collider->position));
+            glm::vec3 triNormal = getHitNormal(hit.collider, hit.triangleIndex);
+            glm::vec3 triCenter = getHitCenter(hit.collider, hit.triangleIndex);
+            float planeDist = glm::dot(sPaintStartNormal, triCenter);
+
+            // Only select if same normal direction and on same plane
+            if (glm::dot(triNormal, sPaintStartNormal) > 0.95f &&
+                std::fabs(planeDist - sPaintStartPlane) < 0.1f) {
+                SelectedFace f = {blockPos, hit.triangleIndex};
+                bool already = false;
+                for (const auto& p : sPaintPreview)
+                    if (p.blockPos == f.blockPos && p.faceIndex == f.faceIndex) { already = true; break; }
+                if (!already)
+                    sPaintPreview.push_back(f);
+            }
+        }
+
+        // Right-click release: commit plane selection
+        if (rightJustReleased && sPaintDragging) {
+            if (sPaintPreview.size() <= 1 && hit.hit && hit.collider && hit.triangleIndex >= 0) {
+                // Single click: just select the one face
+                glm::ivec3 blockPos = glm::ivec3(glm::round(hit.collider->position));
+                if (ctrlHeld)
+                    removeSelectedFace(blockPos, hit.triangleIndex);
+                else
+                    addSelectedFace(blockPos, hit.triangleIndex);
+            } else {
+                // Plane drag: commit all previewed faces
+                for (const auto& f : sPaintPreview) {
+                    if (ctrlHeld)
+                        removeSelectedFace(f.blockPos, f.faceIndex);
+                    else
+                        addSelectedFace(f.blockPos, f.faceIndex);
+                }
+            }
+            sPaintPreview.clear();
+            sPaintDragging = false;
+        }
+
+        // Cancel drag if right released without hit
+        if (rightJustReleased)
+            sPaintDragging = false;
+    }
+
+    // Start drag (build mode)
     if (rightJustPressed && hit.hit && hit.collider && (hit.collider->isRectangular || isForceRectangularRaycast())) {
         sDragging = true;
         sStartBlock = glm::ivec3(glm::round(hit.collider->position));
@@ -285,6 +461,19 @@ void renderHoverHighlight() {
         for (const auto& f : preview)
             drawFaceOverlay(f.blockPos, f.faceIndex, previewColor, 0.35f);
         return;
+    }
+
+    // Draw paint mode plane-drag preview
+    if (sPaintDragging && !sPaintPreview.empty()) {
+        glm::vec3 previewColor = ctrlHeld ? glm::vec3(1.0f, 0.3f, 0.3f) : glm::vec3(0.3f, 0.7f, 1.0f);
+        for (const auto& f : sPaintPreview) {
+            const BlockCollider* col = getColliderAt(f.blockPos.x, f.blockPos.y, f.blockPos.z);
+            if (!col) continue;
+            if (col->isRectangular)
+                drawFaceOverlay(f.blockPos, f.faceIndex, previewColor, 0.35f);
+            else if (f.faceIndex < (int)col->triangles.size())
+                drawTriangleOverlay(*ctx.shader, col->triangles[f.faceIndex], previewColor, 0.35f);
+        }
     }
 
     if (!hit.hit || hit.triangleIndex < 0 || !hit.collider)

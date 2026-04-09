@@ -1,15 +1,41 @@
 #include "ChunkMesh.h"
 #include "../inputManagement/Collision.h"
+#include <glm/gtc/matrix_transform.hpp>
 #include <unordered_set>
 #include <fstream>
 #include <iostream>
 #include <cmath>
 #include <algorithm>
 
+static glm::vec3 rotatePoint(const glm::vec3& v, const glm::vec3& rotDeg) {
+    if (rotDeg.x == 0.0f && rotDeg.y == 0.0f && rotDeg.z == 0.0f)
+        return v;
+    glm::mat4 m(1.0f);
+    m = glm::rotate(m, glm::radians(rotDeg.x), glm::vec3(1, 0, 0));
+    m = glm::rotate(m, glm::radians(rotDeg.y), glm::vec3(0, 1, 0));
+    m = glm::rotate(m, glm::radians(rotDeg.z), glm::vec3(0, 0, 1));
+    return glm::vec3(m * glm::vec4(v, 1.0f));
+}
+
 // ── Mesh registry ───────────────────────────────────────────────────
 
 static std::unordered_map<std::string, RegisteredMesh> gMeshes;
 static std::vector<DrawInstance> gDrawList;
+static glm::vec3 gPaintPalette[8] = {};
+static std::shared_ptr<Texture> gPaletteTexture;
+
+void setPaintPalette(const glm::vec3 palette[8]) {
+    for (int i = 0; i < 8; i++)
+        gPaintPalette[i] = palette[i];
+
+    unsigned char pixels[8 * 3];
+    for (int i = 0; i < 8; i++) {
+        pixels[i * 3 + 0] = (unsigned char)(std::clamp(palette[i].r, 0.0f, 1.0f) * 255.0f);
+        pixels[i * 3 + 1] = (unsigned char)(std::clamp(palette[i].g, 0.0f, 1.0f) * 255.0f);
+        pixels[i * 3 + 2] = (unsigned char)(std::clamp(palette[i].b, 0.0f, 1.0f) * 255.0f);
+    }
+    gPaletteTexture = std::make_shared<Texture>(pixels, 8, 1, 3);
+}
 
 void registerMesh(const char* name, const VE::MeshDef& def) {
     RegisteredMesh reg;
@@ -73,8 +99,9 @@ void registerMeshFromFile(const char* name, const char* meshFilePath) {
     gMeshes[name] = std::move(reg);
 }
 
-void addDrawInstance(const char* meshName, float x, float y, float z) {
-    gDrawList.push_back({glm::vec3(x, y, z), meshName});
+void addDrawInstance(const char* meshName, float x, float y, float z,
+                     float rx, float ry, float rz) {
+    gDrawList.push_back({glm::vec3(x, y, z), glm::vec3(rx, ry, rz), meshName});
 }
 
 void removeDrawInstance(float x, float y, float z) {
@@ -212,18 +239,23 @@ std::vector<MergedMeshEntry> buildSingleMeshes() {
         // Opposite face index: +X<->-X, +Y<->-Y, +Z<->-Z
         static const int oppositeFace[6] = {1, 0, 3, 2, 5, 4};
 
+        // Per-color paint buckets: [colorIdx] -> {verts, indices}
+        struct PaintBucket { std::vector<float> verts; std::vector<unsigned int> indices; };
+        PaintBucket paintBuckets[8];
+
         if (reg.rectangular) {
             // Rectangular mesh: face cull using solidFaces
             for (const DrawInstance* inst : group) {
+                bool hasRot = (inst->rotation.x != 0.0f || inst->rotation.y != 0.0f || inst->rotation.z != 0.0f);
                 glm::ivec3 pos((int)roundf(inst->position.x), (int)roundf(inst->position.y), (int)roundf(inst->position.z));
+                const BlockCollider* col = getColliderAt(pos.x, pos.y, pos.z);
 
                 for (int f = 0; f < 6; f++) {
                     int solidIdx = ndirToSolid[f];
 
-                    glm::ivec3 neighbor = pos + glm::ivec3(neighborDir[f][0], neighborDir[f][1], neighborDir[f][2]);
-
-                    // Cull if this face is solid AND neighbor's opposite face is solid
-                    if (reg.solidFaces[solidIdx]) {
+                    // Skip face culling for rotated instances
+                    if (!hasRot && reg.solidFaces[solidIdx]) {
+                        glm::ivec3 neighbor = pos + glm::ivec3(neighborDir[f][0], neighborDir[f][1], neighborDir[f][2]);
                         auto nit = occupiedMesh.find(neighbor);
                         if (nit != occupiedMesh.end()) {
                             auto nmit = gMeshes.find(nit->second);
@@ -232,85 +264,112 @@ std::vector<MergedMeshEntry> buildSingleMeshes() {
                         }
                     }
 
-                    unsigned int baseIdx = (unsigned int)(verts.size() / 5);
+                    // Map mesh face order to raycast face order
+                    // Mesh: 0=+Z, 1=-Z, 2=-X, 3=+X, 4=+Y, 5=-Y
+                    // Raycast: 0=+X, 1=-X, 2=+Y, 3=-Y, 4=+Z, 5=-Z
+                    static const int meshToRayFace[6] = {4, 5, 1, 0, 2, 3};
+                    int rayFace = meshToRayFace[f];
+                    int8_t colorIdx = -1;
+                    if (col && rayFace < (int)col->triColors.size())
+                        colorIdx = col->triColors[rayFace];
+
+                    auto& tv = (colorIdx >= 0) ? paintBuckets[colorIdx].verts : verts;
+                    auto& ti = (colorIdx >= 0) ? paintBuckets[colorIdx].indices : indices;
+
+                    unsigned int baseIdx = (unsigned int)(tv.size() / 5);
 
                     for (int v = 0; v < 4; v++) {
                         int src = (faceVertStart[f] + v) * 5;
-                        verts.push_back(reg.vertices[src + 0] + inst->position.x);
-                        verts.push_back(reg.vertices[src + 1] + inst->position.y);
-                        verts.push_back(reg.vertices[src + 2] + inst->position.z);
-                        verts.push_back(reg.vertices[src + 3]);
-                        verts.push_back(reg.vertices[src + 4]);
+                        glm::vec3 local(reg.vertices[src + 0], reg.vertices[src + 1], reg.vertices[src + 2]);
+                        glm::vec3 world = rotatePoint(local, inst->rotation) + inst->position;
+                        tv.push_back(world.x);
+                        tv.push_back(world.y);
+                        tv.push_back(world.z);
+                        tv.push_back(reg.vertices[src + 3]);
+                        tv.push_back(reg.vertices[src + 4]);
                     }
 
                     for (int i = 0; i < 6; i++)
-                        indices.push_back(baseIdx + faceIdx[f][i]);
+                        ti.push_back(baseIdx + faceIdx[f][i]);
                 }
             }
         } else {
             // Non-rectangular mesh: per-triangle culling using triCullState
             int fpv = reg.floatsPerVertex; // 5 or 8
             for (const DrawInstance* inst : group) {
+                bool hasRot = (inst->rotation.x != 0.0f || inst->rotation.y != 0.0f || inst->rotation.z != 0.0f);
                 glm::ivec3 pos((int)roundf(inst->position.x), (int)roundf(inst->position.y), (int)roundf(inst->position.z));
+                const BlockCollider* col = getColliderAt(pos.x, pos.y, pos.z);
 
-                unsigned int baseIdx = (unsigned int)(verts.size() / fpv);
+                // Pre-transform all vertices for this instance
+                std::vector<float> instVerts(reg.vertexCount * fpv);
                 for (int v = 0; v < reg.vertexCount; v++) {
                     int src = v * fpv;
-                    verts.push_back(reg.vertices[src + 0] + inst->position.x);
-                    verts.push_back(reg.vertices[src + 1] + inst->position.y);
-                    verts.push_back(reg.vertices[src + 2] + inst->position.z);
-                    verts.push_back(reg.vertices[src + 3]); // u
-                    verts.push_back(reg.vertices[src + 4]); // v
+                    glm::vec3 local(reg.vertices[src + 0], reg.vertices[src + 1], reg.vertices[src + 2]);
+                    glm::vec3 world = rotatePoint(local, inst->rotation) + inst->position;
+                    instVerts[v * fpv + 0] = world.x;
+                    instVerts[v * fpv + 1] = world.y;
+                    instVerts[v * fpv + 2] = world.z;
+                    instVerts[v * fpv + 3] = reg.vertices[src + 3];
+                    instVerts[v * fpv + 4] = reg.vertices[src + 4];
                     if (fpv == 8) {
-                        verts.push_back(reg.vertices[src + 5]); // nx
-                        verts.push_back(reg.vertices[src + 6]); // ny
-                        verts.push_back(reg.vertices[src + 7]); // nz
+                        glm::vec3 n(reg.vertices[src + 5], reg.vertices[src + 6], reg.vertices[src + 7]);
+                        glm::vec3 rn = rotatePoint(n, inst->rotation);
+                        instVerts[v * fpv + 5] = rn.x;
+                        instVerts[v * fpv + 6] = rn.y;
+                        instVerts[v * fpv + 7] = rn.z;
                     }
                 }
+
+                // Helper to emit a triangle to a target buffer
+                auto emitTri = [&](std::vector<float>& tv, std::vector<unsigned int>& ti,
+                                   unsigned int i0, unsigned int i1, unsigned int i2) {
+                    unsigned int base = (unsigned int)(tv.size() / fpv);
+                    for (int vi : {(int)i0, (int)i1, (int)i2}) {
+                        for (int j = 0; j < fpv; j++)
+                            tv.push_back(instVerts[vi * fpv + j]);
+                    }
+                    ti.push_back(base); ti.push_back(base + 1); ti.push_back(base + 2);
+                };
 
                 int triCount = reg.indexCount / 3;
                 for (int t = 0; t < triCount; t++) {
                     unsigned int i0 = reg.indices[t*3], i1 = reg.indices[t*3+1], i2 = reg.indices[t*3+2];
                     int state = (t < (int)reg.triCullState.size()) ? reg.triCullState[t] : 0;
 
-                    // State 0: always draw
-                    if (state == 0) {
-                        indices.push_back(baseIdx + i0);
-                        indices.push_back(baseIdx + i1);
-                        indices.push_back(baseIdx + i2);
-                        continue;
-                    }
-
-                    // State 1 or 2: cull if neighbor has state 2 on opposite face
-                    glm::vec3 v0(reg.vertices[i0*fpv], reg.vertices[i0*fpv+1], reg.vertices[i0*fpv+2]);
-                    glm::vec3 v1(reg.vertices[i1*fpv], reg.vertices[i1*fpv+1], reg.vertices[i1*fpv+2]);
-                    glm::vec3 v2(reg.vertices[i2*fpv], reg.vertices[i2*fpv+1], reg.vertices[i2*fpv+2]);
-                    glm::vec3 normal = glm::normalize(glm::cross(v1 - v0, v2 - v0));
-
-                    int faceDir = -1;
-                    float bestDot = 0.5f;
-                    for (int f = 0; f < 6; f++) {
-                        glm::vec3 fn((float)neighborDir[f][0], (float)neighborDir[f][1], (float)neighborDir[f][2]);
-                        float d = glm::dot(normal, fn);
-                        if (d > bestDot) { bestDot = d; faceDir = f; }
-                    }
-
-                    bool cull = false;
-                    if (faceDir >= 0) {
-                        int solidIdx = ndirToSolid[faceDir];
-                        glm::ivec3 neighbor = pos + glm::ivec3(neighborDir[faceDir][0], neighborDir[faceDir][1], neighborDir[faceDir][2]);
-                        auto nit = occupiedMesh.find(neighbor);
-                        if (nit != occupiedMesh.end()) {
-                            auto nmit = gMeshes.find(nit->second);
-                            if (nmit != gMeshes.end() && nmit->second.solidFaces[oppositeFace[solidIdx]])
-                                cull = true;
+                    bool draw = true;
+                    if (state != 0 && !hasRot) {
+                        glm::vec3 v0(reg.vertices[i0*fpv], reg.vertices[i0*fpv+1], reg.vertices[i0*fpv+2]);
+                        glm::vec3 v1(reg.vertices[i1*fpv], reg.vertices[i1*fpv+1], reg.vertices[i1*fpv+2]);
+                        glm::vec3 v2(reg.vertices[i2*fpv], reg.vertices[i2*fpv+1], reg.vertices[i2*fpv+2]);
+                        glm::vec3 normal = glm::normalize(glm::cross(v1 - v0, v2 - v0));
+                        int faceDir = -1;
+                        float bestDot = 0.5f;
+                        for (int f = 0; f < 6; f++) {
+                            glm::vec3 fn((float)neighborDir[f][0], (float)neighborDir[f][1], (float)neighborDir[f][2]);
+                            float d = glm::dot(normal, fn);
+                            if (d > bestDot) { bestDot = d; faceDir = f; }
+                        }
+                        if (faceDir >= 0) {
+                            int solidIdx = ndirToSolid[faceDir];
+                            glm::ivec3 neighbor = pos + glm::ivec3(neighborDir[faceDir][0], neighborDir[faceDir][1], neighborDir[faceDir][2]);
+                            auto nit = occupiedMesh.find(neighbor);
+                            if (nit != occupiedMesh.end()) {
+                                auto nmit = gMeshes.find(nit->second);
+                                if (nmit != gMeshes.end() && nmit->second.solidFaces[oppositeFace[solidIdx]])
+                                    draw = false;
+                            }
                         }
                     }
 
-                    if (!cull) {
-                        indices.push_back(baseIdx + i0);
-                        indices.push_back(baseIdx + i1);
-                        indices.push_back(baseIdx + i2);
+                    if (draw) {
+                        int8_t colorIdx = -1;
+                        if (col && t < (int)col->triColors.size())
+                            colorIdx = col->triColors[t];
+                        if (colorIdx >= 0)
+                            emitTri(paintBuckets[colorIdx].verts, paintBuckets[colorIdx].indices, i0, i1, i2);
+                        else
+                            emitTri(verts, indices, i0, i1, i2);
                     }
                 }
             }
@@ -325,6 +384,20 @@ std::vector<MergedMeshEntry> buildSingleMeshes() {
                 mesh = std::make_unique<Mesh>(verts.data(), (int)(verts.size() / 5), indices.data(), (int)indices.size());
             if (reg.texture) mesh->setTexture(reg.texture.get());
             result.push_back({std::move(mesh), reg.texture});
+        }
+
+        // Emit painted triangle batches (one mesh per color)
+        for (int c = 0; c < 8; c++) {
+            auto& pb = paintBuckets[c];
+            if (pb.verts.empty()) continue;
+            int fpv = reg.rectangular ? 5 : reg.floatsPerVertex;
+            std::unique_ptr<Mesh> mesh;
+            if (fpv == 8)
+                mesh = std::make_unique<Mesh>(pb.verts.data(), (int)(pb.verts.size() / 8), pb.indices.data(), (int)pb.indices.size(), true);
+            else
+                mesh = std::make_unique<Mesh>(pb.verts.data(), (int)(pb.verts.size() / 5), pb.indices.data(), (int)pb.indices.size());
+            mesh->setColor(gPaintPalette[c]);
+            result.push_back({std::move(mesh), nullptr});
         }
     }
 

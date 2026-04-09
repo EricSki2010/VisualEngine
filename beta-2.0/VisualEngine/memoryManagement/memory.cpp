@@ -267,7 +267,7 @@ bool saveModel(const std::string& name, const ModelFile& model) {
 
     // Magic + version
     out.write("MDL", 3);
-    uint8_t version = 2;
+    uint8_t version = 3;
     out.write(reinterpret_cast<const char*>(&version), 1);
 
     // Block types section
@@ -310,6 +310,16 @@ bool saveModel(const std::string& name, const ModelFile& model) {
         writeU32(out, (uint32_t)p.rx);
         writeU32(out, (uint32_t)p.ry);
         writeU32(out, (uint32_t)p.rz);
+        writeU32(out, (uint32_t)p.triColors.size());
+        for (int8_t c : p.triColors)
+            out.write(reinterpret_cast<const char*>(&c), 1);
+    }
+
+    // Palette (v3+)
+    for (int i = 0; i < 8; i++) {
+        writeF32(out, model.palette[i].r);
+        writeF32(out, model.palette[i].g);
+        writeF32(out, model.palette[i].b);
     }
 
     return true;
@@ -373,6 +383,21 @@ bool loadModel(const std::string& name, ModelFile& model) {
         p.rx = (int)readU32(in);
         p.ry = (int)readU32(in);
         p.rz = (int)readU32(in);
+        if (version >= 3) {
+            uint32_t triColorCount = readU32(in);
+            p.triColors.resize(triColorCount);
+            for (uint32_t j = 0; j < triColorCount; j++)
+                in.read(reinterpret_cast<char*>(&p.triColors[j]), 1);
+        }
+    }
+
+    // Palette (v3+)
+    if (version >= 3) {
+        for (int i = 0; i < 8; i++) {
+            model.palette[i].r = readF32(in);
+            model.palette[i].g = readF32(in);
+            model.palette[i].b = readF32(in);
+        }
     }
 
     return true;

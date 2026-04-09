@@ -49,11 +49,13 @@ void drawTriangleOverlay(Shader& shader, const Triangle& tri, const glm::vec3& c
     glUniform1i(shader.loc("useTexture"), 0);
     glUniform3fv(shader.loc("objectColor"), 1, glm::value_ptr(color));
     glUniform1f(shader.loc("alpha"), alpha);
+    glUniform1f(shader.loc("ambientStrength"), 1.0f);
 
     glBindVertexArray(sOverlayVAO);
     glDrawArrays(GL_TRIANGLES, 0, 3);
 
     glUniform1f(shader.loc("alpha"), 1.0f);
+    glUniform1f(shader.loc("ambientStrength"), 0.15f);
     glDepthFunc(GL_LESS);
     glDisable(GL_POLYGON_OFFSET_FILL);
     glDisable(GL_BLEND);

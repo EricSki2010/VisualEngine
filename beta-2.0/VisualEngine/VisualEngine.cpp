@@ -99,15 +99,16 @@ void setMode(MeshMode mode) {
     ctx.needsRebuild = true;
 }
 
-void draw(const char* meshName, float x, float y, float z) {
+void draw(const char* meshName, float x, float y, float z,
+          float rx, float ry, float rz) {
     // Remove any existing collider at this position (e.g. ghost block)
     removeCollider(x, y, z);
-    addDrawInstance(meshName, x, y, z);
+    addDrawInstance(meshName, x, y, z, rx, ry, rz);
     const RegisteredMesh* reg = getRegisteredMesh(meshName);
     if (reg)
         addCollider(meshName, reg->vertices.data(), reg->vertexCount,
                     reg->indices.data(), reg->indexCount, reg->rectangular, x, y, z,
-                    reg->floatsPerVertex);
+                    reg->floatsPerVertex, rx, ry, rz);
     ctx.needsRebuild = true;
 }
 

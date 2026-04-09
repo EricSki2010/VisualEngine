@@ -83,3 +83,7 @@ void drawUIElement(const UIElement& element) {
     glEnable(GL_DEPTH_TEST);
     glDisable(GL_BLEND);
 }
+
+Shader* getUIShader() {
+    return sUIShader;
+}

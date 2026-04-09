@@ -23,6 +23,7 @@ struct RegisteredMesh {
 
 struct DrawInstance {
     glm::vec3 position;
+    glm::vec3 rotation;  // degrees (rx, ry, rz)
     std::string meshName;
 };
 
@@ -33,7 +34,8 @@ struct MergedMeshEntry {
 
 void registerMesh(const char* name, const VE::MeshDef& def);
 void registerMeshFromFile(const char* name, const char* meshFilePath);
-void addDrawInstance(const char* meshName, float x, float y, float z);
+void addDrawInstance(const char* meshName, float x, float y, float z,
+                     float rx = 0.0f, float ry = 0.0f, float rz = 0.0f);
 void removeDrawInstance(float x, float y, float z);
 void clearDrawInstances();
 std::vector<MergedMeshEntry> buildMergedMeshes();  // CHUNK mode: face culling + merge
@@ -41,6 +43,7 @@ std::vector<MergedMeshEntry> buildSingleMeshes();  // SINGLE mode: full meshes, 
 void clearMeshData();
 const RegisteredMesh* getRegisteredMesh(const char* name);
 void setMeshSolidFaces(const char* name, bool faces[6]);
+void setPaintPalette(const glm::vec3 palette[8]);
 // Register mesh with interleaved indices+state: v0,v1,v2,state, v0,v1,v2,state, ...
 void registerMeshWithStates(const char* name, float* vertices, int vertexCount,
                             unsigned int* interleavedIndices, int triCount,
