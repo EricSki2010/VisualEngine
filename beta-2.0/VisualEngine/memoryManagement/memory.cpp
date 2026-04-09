@@ -316,7 +316,7 @@ bool saveModel(const std::string& name, const ModelFile& model) {
     }
 
     // Palette (v3+)
-    for (int i = 0; i < 8; i++) {
+    for (int i = 0; i < 16; i++) {
         writeF32(out, model.palette[i].r);
         writeF32(out, model.palette[i].g);
         writeF32(out, model.palette[i].b);
@@ -393,7 +393,7 @@ bool loadModel(const std::string& name, ModelFile& model) {
 
     // Palette (v3+)
     if (version >= 3) {
-        for (int i = 0; i < 8; i++) {
+        for (int i = 0; i < 16; i++) {
             model.palette[i].r = readF32(in);
             model.palette[i].g = readF32(in);
             model.palette[i].b = readF32(in);

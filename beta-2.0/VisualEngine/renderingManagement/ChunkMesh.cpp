@@ -21,20 +21,24 @@ static glm::vec3 rotatePoint(const glm::vec3& v, const glm::vec3& rotDeg) {
 
 static std::unordered_map<std::string, RegisteredMesh> gMeshes;
 static std::vector<DrawInstance> gDrawList;
-static glm::vec3 gPaintPalette[8] = {};
+static glm::vec3 gPaintPalette[16] = {};
 static std::shared_ptr<Texture> gPaletteTexture;
 
-void setPaintPalette(const glm::vec3 palette[8]) {
-    for (int i = 0; i < 8; i++)
+void setPaintPalette(const glm::vec3 palette[16]) {
+    for (int i = 0; i < 16; i++)
         gPaintPalette[i] = palette[i];
 
-    unsigned char pixels[8 * 3];
-    for (int i = 0; i < 8; i++) {
+    unsigned char pixels[16 * 3];
+    for (int i = 0; i < 16; i++) {
         pixels[i * 3 + 0] = (unsigned char)(std::clamp(palette[i].r, 0.0f, 1.0f) * 255.0f);
         pixels[i * 3 + 1] = (unsigned char)(std::clamp(palette[i].g, 0.0f, 1.0f) * 255.0f);
         pixels[i * 3 + 2] = (unsigned char)(std::clamp(palette[i].b, 0.0f, 1.0f) * 255.0f);
     }
-    gPaletteTexture = std::make_shared<Texture>(pixels, 8, 1, 3);
+    gPaletteTexture = std::make_shared<Texture>(pixels, 16, 1, 3);
+}
+
+const glm::vec3* getPaintPalette() {
+    return gPaintPalette;
 }
 
 void registerMesh(const char* name, const VE::MeshDef& def) {
@@ -169,12 +173,13 @@ static void deriveSolidFaces(RegisteredMesh& reg) {
 
 void registerMeshWithStates(const char* name, float* vertices, int vertexCount,
                             unsigned int* interleavedIndices, int triCount,
-                            const char* texturePath) {
+                            const char* texturePath, bool isPrefab) {
     RegisteredMesh reg;
     reg.vertices.assign(vertices, vertices + vertexCount * 5);
     reg.vertexCount = vertexCount;
     reg.texture = texturePath ? std::make_shared<Texture>(texturePath) : nullptr;
     reg.rectangular = (vertexCount == 24);
+    reg.isPrefab = isPrefab;
 
     // Parse interleaved: v0,v1,v2,state, v0,v1,v2,state, ...
     reg.indices.reserve(triCount * 3);
@@ -241,7 +246,7 @@ std::vector<MergedMeshEntry> buildSingleMeshes() {
 
         // Per-color paint buckets: [colorIdx] -> {verts, indices}
         struct PaintBucket { std::vector<float> verts; std::vector<unsigned int> indices; };
-        PaintBucket paintBuckets[8];
+        PaintBucket paintBuckets[16];
 
         if (reg.rectangular) {
             // Rectangular mesh: face cull using solidFaces
@@ -387,7 +392,7 @@ std::vector<MergedMeshEntry> buildSingleMeshes() {
         }
 
         // Emit painted triangle batches (one mesh per color)
-        for (int c = 0; c < 8; c++) {
+        for (int c = 0; c < 16; c++) {
             auto& pb = paintBuckets[c];
             if (pb.verts.empty()) continue;
             int fpv = reg.rectangular ? 5 : reg.floatsPerVertex;

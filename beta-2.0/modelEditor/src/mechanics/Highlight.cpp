@@ -253,6 +253,7 @@ void renderHoverHighlight() {
     // Ctrl+D deletes selected blocks (build mode only)
     bool dDown = glfwGetKey(ctx.window, GLFW_KEY_D) == GLFW_PRESS;
     if (dDown && !sWasDDown && ctrlHeld && !getSelection().empty() && isForceRectangularRaycast()) {
+        pushUndoSnapshot();
         std::vector<glm::ivec3> blocks;
         for (const auto& sel : getSelection()) {
             bool already = false;
@@ -270,6 +271,7 @@ void renderHoverHighlight() {
     // Ctrl+A: block select mode = replace blocks, face select mode = extrude (build mode only)
     bool aDown = glfwGetKey(ctx.window, GLFW_KEY_A) == GLFW_PRESS;
     if (aDown && !sWasADown && ctrlHeld && !getSelection().empty() && !rightDown && isForceRectangularRaycast()) {
+        pushUndoSnapshot();
         if (sBlockSelectMode) {
             // Replace: remove and re-place each selected block
             std::vector<glm::ivec3> blocks;
@@ -307,7 +309,8 @@ void renderHoverHighlight() {
     // Ctrl+A in paint mode: color selected faces
     if (aDown && !sWasADown && ctrlHeld && !getSelection().empty() && !isForceRectangularRaycast()) {
         int colorIdx = getSelectedPaintColor();
-        if (colorIdx >= 0 && colorIdx < 8) {
+        if (colorIdx >= 0 && colorIdx < 16) {
+            pushUndoSnapshot();
             for (const auto& sel : getSelection()) {
                 BlockCollider* col = const_cast<BlockCollider*>(
                     getColliderAt(sel.blockPos.x, sel.blockPos.y, sel.blockPos.z));
@@ -333,6 +336,7 @@ void renderHoverHighlight() {
         if (key3 && !sWas3Down) { addRot.z = 45.0f; doRotate = true; }
 
         if (doRotate) {
+            pushUndoSnapshot();
             std::vector<glm::ivec3> blocks;
             for (const auto& sel : getSelection()) {
                 bool already = false;

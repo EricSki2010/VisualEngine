@@ -72,6 +72,74 @@ static int sReturnSlot = -1;
 static std::string sReturnModelName;
 static bool sVMeshPaused = false;
 static bool sVMeshWasEscDown = false;
+static bool sVMeshWasCtrlTabDown = false;
+static bool sVMeshWasCtrlZDown = false;
+
+// Undo system: snapshot of all placed geometry
+struct VMeshSnapshot {
+    std::vector<glm::vec3> dots;
+    std::vector<PlacedLine> lines;
+    std::vector<PlacedTriangle> triangles;
+};
+static std::vector<VMeshSnapshot> sVMeshUndoStack;
+static const int kVMeshMaxUndoSteps = 50;
+
+static void pushVMeshUndo() {
+    VMeshSnapshot s;
+    s.dots = sPlacedDots;
+    s.lines = sPlacedLines;
+    s.triangles = sPlacedTriangles;
+    sVMeshUndoStack.push_back(std::move(s));
+    if ((int)sVMeshUndoStack.size() > kVMeshMaxUndoSteps)
+        sVMeshUndoStack.erase(sVMeshUndoStack.begin());
+}
+
+static void exportVMeshToMesh() {
+    if (sVMeshName.empty() || sPlacedTriangles.empty()) return;
+    std::string meshPath = "assets/saves/vectorMeshes/" + sVMeshName + ".mesh";
+    std::ofstream out(meshPath, std::ios::binary);
+    if (!out) return;
+
+    std::vector<float> verts;
+    std::vector<unsigned int> indices;
+    for (const auto& t : sPlacedTriangles) {
+        if (t.dotA < (int)sPlacedDots.size() && t.dotB < (int)sPlacedDots.size() &&
+            t.dotC < (int)sPlacedDots.size()) {
+
+            glm::vec3 va = sPlacedDots[t.dotA];
+            glm::vec3 vb = sPlacedDots[t.dotB];
+            glm::vec3 vc = sPlacedDots[t.dotC];
+
+            glm::vec3 normal = glm::cross(vb - va, vc - va);
+            if (t.flipped) {
+                std::swap(vb, vc);
+                normal = -normal;
+            }
+            normal = glm::normalize(-normal);
+
+            unsigned int base = (unsigned int)(verts.size() / 8);
+            auto addVert = [&](const glm::vec3& p, const glm::vec3& n) {
+                verts.push_back(p.x); verts.push_back(p.y); verts.push_back(p.z);
+                verts.push_back(0.0f); verts.push_back(0.0f);
+                verts.push_back(n.x); verts.push_back(n.y); verts.push_back(n.z);
+            };
+
+            addVert(va, normal); addVert(vb, normal); addVert(vc, normal);
+            indices.push_back(base); indices.push_back(base+1); indices.push_back(base+2);
+        }
+    }
+
+    uint32_t vertCount = (uint32_t)(verts.size() / 8);
+    uint32_t idxCount = (uint32_t)indices.size();
+    uint32_t texPathLen = 0;
+    char magic[2] = {'V', 'N'};
+    out.write(magic, 2);
+    out.write(reinterpret_cast<const char*>(&vertCount), 4);
+    out.write(reinterpret_cast<const char*>(&idxCount), 4);
+    out.write(reinterpret_cast<const char*>(&texPathLen), 4);
+    out.write(reinterpret_cast<const char*>(verts.data()), verts.size() * sizeof(float));
+    out.write(reinterpret_cast<const char*>(indices.data()), indices.size() * sizeof(uint32_t));
+}
 
 static void saveVectorMesh() {
     if (sVMeshName.empty()) return;
@@ -176,59 +244,7 @@ static void openVMeshPauseMenu() {
         {0.1f, 0.4f, 0.15f, 0.95f}, "Save Model",
         []() {
             saveVectorMesh();
-
-            // Export as .mesh-compatible data: convert triangles to vertex/index arrays
-            // This writes a simple mesh file that can be loaded as a block type
-            if (!sVMeshName.empty() && !sPlacedTriangles.empty()) {
-                std::string meshPath = "assets/saves/vectorMeshes/" + sVMeshName + ".mesh";
-                std::ofstream out(meshPath, std::ios::binary);
-                if (out) {
-                    // Build vertex/index data with normals from placed triangles
-                    // Format: pos3 + uv2 + normal3 = 8 floats per vertex
-                    std::vector<float> verts;
-                    std::vector<unsigned int> indices;
-                    for (const auto& t : sPlacedTriangles) {
-                        if (t.dotA < (int)sPlacedDots.size() && t.dotB < (int)sPlacedDots.size() &&
-                            t.dotC < (int)sPlacedDots.size()) {
-
-                            glm::vec3 va = sPlacedDots[t.dotA];
-                            glm::vec3 vb = sPlacedDots[t.dotB];
-                            glm::vec3 vc = sPlacedDots[t.dotC];
-
-                            // Flip normal for correct lighting when loaded
-                            glm::vec3 normal = glm::cross(vb - va, vc - va);
-                            if (t.flipped) {
-                                std::swap(vb, vc);
-                                normal = -normal;
-                            }
-                            normal = glm::normalize(-normal);
-
-                            unsigned int base = (unsigned int)(verts.size() / 8);
-                            auto addVert = [&](const glm::vec3& p, const glm::vec3& n) {
-                                verts.push_back(p.x); verts.push_back(p.y); verts.push_back(p.z);
-                                verts.push_back(0.0f); verts.push_back(0.0f); // uv
-                                verts.push_back(n.x); verts.push_back(n.y); verts.push_back(n.z);
-                            };
-
-                            addVert(va, normal); addVert(vb, normal); addVert(vc, normal);
-                            indices.push_back(base); indices.push_back(base+1); indices.push_back(base+2);
-                        }
-                    }
-
-                    // Write with magic "VN" to indicate normals included
-                    uint32_t vertCount = (uint32_t)(verts.size() / 8);
-                    uint32_t idxCount = (uint32_t)indices.size();
-                    uint32_t texPathLen = 0;
-                    char magic[2] = {'V', 'N'};
-                    out.write(magic, 2);
-                    out.write(reinterpret_cast<const char*>(&vertCount), 4);
-                    out.write(reinterpret_cast<const char*>(&idxCount), 4);
-                    out.write(reinterpret_cast<const char*>(&texPathLen), 4);
-                    out.write(reinterpret_cast<const char*>(verts.data()), verts.size() * sizeof(float));
-                    out.write(reinterpret_cast<const char*>(indices.data()), indices.size() * sizeof(uint32_t));
-                }
-            }
-
+            exportVMeshToMesh();
             sVMeshPaused = false;
             VE::setBrightness(1.0f);
             removeUIGroup("vmesh_pause");
@@ -371,6 +387,7 @@ static void rebuildModeTools() {
                 {0.3f, 0.2f, 0.5f, 0.95f}, "Flip Normal",
                 []() {
                     if (sSelectedTriIndex >= 0 && sSelectedTriIndex < (int)sPlacedTriangles.size()) {
+                        pushVMeshUndo();
                         sPlacedTriangles[sSelectedTriIndex].flipped = !sPlacedTriangles[sSelectedTriIndex].flipped;
                     }
                 }
@@ -418,6 +435,7 @@ void registerVectorMeshScene() {
                 sReturnModelName = editData->modelName;
                 delete editData;
             }
+            sVMeshUndoStack.clear();
 
             // Right sidebar
             addUIGroup("sidebar");
@@ -479,6 +497,46 @@ void registerVectorMeshScene() {
             }
             sVMeshWasEscDown = escDown;
 
+            // Ctrl+Tab: save and exit back to 3dModeler - fires on release
+            bool ctrlHeld = glfwGetKey(ctx.window, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS;
+            bool tabDown = glfwGetKey(ctx.window, GLFW_KEY_TAB) == GLFW_PRESS;
+            bool ctrlTab = ctrlHeld && tabDown;
+            if (!ctrlTab && sVMeshWasCtrlTabDown) {
+                sVMeshWasCtrlTabDown = false;
+                saveVectorMesh();
+                exportVMeshToMesh();
+                sVMeshPaused = false;
+                VE::setBrightness(1.0f);
+                removeUIGroup("vmesh_pause");
+                if (!sReturnModelName.empty())
+                    VE::setScene("3dModeler", new std::string(sReturnModelName));
+                else
+                    VE::setScene("menu");
+                return;
+            }
+            sVMeshWasCtrlTabDown = ctrlTab;
+
+            // Ctrl+Z: undo
+            bool zDown = glfwGetKey(ctx.window, GLFW_KEY_Z) == GLFW_PRESS;
+            bool ctrlZ = ctrlHeld && zDown;
+            if (ctrlZ && !sVMeshWasCtrlZDown) {
+                if (!sVMeshUndoStack.empty()) {
+                    VMeshSnapshot s = sVMeshUndoStack.back();
+                    sVMeshUndoStack.pop_back();
+                    sPlacedDots = s.dots;
+                    sPlacedLines = s.lines;
+                    sPlacedTriangles = s.triangles;
+                    sLineSelectedDots.clear();
+                    sPlaneSelectedDots.clear();
+                    sSelectedTriIndex = -1;
+                    sHoverPlacedIndex = -1;
+                    sHoverLineIndex = -1;
+                    sHoverTriIndex = -1;
+                    rebuildModeTools();
+                }
+            }
+            sVMeshWasCtrlZDown = ctrlZ;
+
             processUIInput();
 
             if (sVMeshPaused) return;
@@ -499,6 +557,7 @@ void registerVectorMeshScene() {
                     bool ctrlHeld = glfwGetKey(ctx.window, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS;
                     bool dDown = glfwGetKey(ctx.window, GLFW_KEY_D) == GLFW_PRESS;
                     if (dDown && !sWasDDown && ctrlHeld && sHoverPlacedIndex >= 0) {
+                        pushVMeshUndo();
                         sPlacedDots.erase(sPlacedDots.begin() + sHoverPlacedIndex);
                         sHoverPlacedIndex = -1;
                     }
@@ -555,8 +614,10 @@ void registerVectorMeshScene() {
                         bool exists = false;
                         for (const auto& d : sPlacedDots)
                             if (glm::length(d - sHoverPoint) < 0.001f) { exists = true; break; }
-                        if (!exists)
+                        if (!exists) {
+                            pushVMeshUndo();
                             sPlacedDots.push_back(sHoverPoint);
+                        }
                     }
                     sWasLeftDown = leftDown;
                 }
@@ -590,6 +651,7 @@ void registerVectorMeshScene() {
                     bool ctrlHeld2 = glfwGetKey(ctx.window, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS;
                     bool dDown2 = glfwGetKey(ctx.window, GLFW_KEY_D) == GLFW_PRESS;
                     if (dDown2 && !sWasDDown && ctrlHeld2 && sHoverLineIndex >= 0) {
+                        pushVMeshUndo();
                         sPlacedLines.erase(sPlacedLines.begin() + sHoverLineIndex);
                         sHoverLineIndex = -1;
                     }
@@ -625,6 +687,7 @@ void registerVectorMeshScene() {
                                 { exists = true; break; }
 
                         if (!exists) {
+                            pushVMeshUndo();
                             sPlacedLines.push_back({a, b});
                             sLineSelectedDots.clear();
                         }
@@ -713,6 +776,7 @@ void registerVectorMeshScene() {
                         }
 
                         if (!exists) {
+                            pushVMeshUndo();
                             sPlacedTriangles.push_back({a, b, c});
                             sPlaneSelectedDots.clear();
                         }
@@ -723,6 +787,7 @@ void registerVectorMeshScene() {
                     bool ctrlHeld2 = glfwGetKey(ctx.window, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS;
                     bool dDown2 = glfwGetKey(ctx.window, GLFW_KEY_D) == GLFW_PRESS;
                     if (dDown2 && !sWasDDown && ctrlHeld2 && sHoverTriIndex >= 0) {
+                        pushVMeshUndo();
                         sPlacedTriangles.erase(sPlacedTriangles.begin() + sHoverTriIndex);
                         sHoverTriIndex = -1;
                     }
@@ -787,8 +852,8 @@ void registerVectorMeshScene() {
                     else if (i == sHoverTriIndex)
                         color = glm::vec3(1.0f, 0.5f, 0.0f);
 
-                    drawTriangleOverlay(*ctx.shader, front, color, 1.0f);
-                    drawTriangleOverlay(*ctx.shader, back, color, 1.0f);
+                    drawTriangleOverlay(*ctx.shader, front, color, 1.0f, false);
+                    drawTriangleOverlay(*ctx.shader, back, color, 1.0f, false);
                 }
             }
 

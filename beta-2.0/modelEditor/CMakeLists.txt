@@ -37,6 +37,7 @@ add_executable(modelEditor
     src/mechanics/Selection.cpp
     src/mechanics/scenes.cpp
     src/mechanics/setup.cpp
+    src/mechanics/GltfExporter.cpp
     src/prefabs/templates.cpp
     src/scenes/3dModeler.cpp
     src/scenes/createScene.cpp
@@ -47,6 +48,7 @@ add_executable(modelEditor
 
 target_include_directories(modelEditor PRIVATE
     ../VisualEngine
+    ../thirdparty
     E:/glad/include
     C:/vcpkg/installed/x64-windows-static/include
 )

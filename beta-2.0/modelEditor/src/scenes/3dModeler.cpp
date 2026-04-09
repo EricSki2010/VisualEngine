@@ -1,6 +1,7 @@
 #include "3dModeler.h"
 #include "../mechanics/Highlight.h"
 #include "../mechanics/Selection.h"
+#include "../mechanics/GltfExporter.h"
 #include "../../../VisualEngine/VisualEngine.h"
 #include "../../../VisualEngine/EngineGlobals.h"
 #include "../../../VisualEngine/inputManagement/Camera.h"
@@ -20,6 +21,7 @@
 #include <cmath>
 #include <functional>
 #include <algorithm>
+#include <filesystem>
 #include <vector>
 #include <fstream>
 #include <iostream>
@@ -29,6 +31,8 @@
 
 static bool sPaused = false;
 static bool sWasEscDown = false;
+static bool sWasCtrlTabDown = false;
+static bool sWasCtrlZDown = false;
 static bool sWasLeftDown = false;
 static Texture* sBlockSelectorPlus = nullptr;
 static Texture* sBlockSelectorMinus = nullptr;
@@ -47,10 +51,63 @@ static int sColorMode = 0; // 0 = RGB, 1 = Hex, 2 = Color Wheel
 static std::function<void()> sRebuildColorInputs;
 static std::function<void()> sRebuildActionButton;
 static int sSelectedColor = 0; // which color wheel slice is selected
-static glm::vec3 sColorWheel[8] = {
+static glm::vec3 sColorWheel[16] = {
+    {0.6f, 0.6f, 0.6f}, {0.6f, 0.6f, 0.6f}, {0.6f, 0.6f, 0.6f}, {0.6f, 0.6f, 0.6f},
+    {0.6f, 0.6f, 0.6f}, {0.6f, 0.6f, 0.6f}, {0.6f, 0.6f, 0.6f}, {0.6f, 0.6f, 0.6f},
     {0.6f, 0.6f, 0.6f}, {0.6f, 0.6f, 0.6f}, {0.6f, 0.6f, 0.6f}, {0.6f, 0.6f, 0.6f},
     {0.6f, 0.6f, 0.6f}, {0.6f, 0.6f, 0.6f}, {0.6f, 0.6f, 0.6f}, {0.6f, 0.6f, 0.6f},
 };
+
+// Undo snapshot: captures placements + palette state
+struct UndoSnapshot {
+    struct Entry {
+        glm::ivec3 pos;
+        glm::vec3 rotation;
+        std::string meshName;
+        std::vector<int8_t> triColors;
+    };
+    std::vector<Entry> placements;
+    glm::vec3 palette[16];
+};
+static std::vector<UndoSnapshot> sUndoStack;
+static const int kMaxUndoSteps = 50;
+
+static UndoSnapshot captureSnapshot() {
+    UndoSnapshot s;
+    const auto& colliders = getAllColliders();
+    for (const auto& col : colliders) {
+        if (col.meshName == "_ghost") continue;
+        UndoSnapshot::Entry e;
+        e.pos = glm::ivec3(glm::round(col.position));
+        e.rotation = col.rotation;
+        e.meshName = col.meshName;
+        e.triColors = col.triColors;
+        s.placements.push_back(e);
+    }
+    for (int i = 0; i < 16; i++)
+        s.palette[i] = sColorWheel[i];
+    return s;
+}
+
+static void pushUndo() {
+    sUndoStack.push_back(captureSnapshot());
+    if ((int)sUndoStack.size() > kMaxUndoSteps)
+        sUndoStack.erase(sUndoStack.begin());
+}
+
+static void restoreSnapshot(const UndoSnapshot& s) {
+    VE::clearDraws();
+    for (int i = 0; i < 16; i++)
+        sColorWheel[i] = s.palette[i];
+    setPaintPalette(sColorWheel);
+    for (const auto& e : s.placements) {
+        VE::draw(e.meshName.c_str(), (float)e.pos.x, (float)e.pos.y, (float)e.pos.z,
+                 e.rotation.x, e.rotation.y, e.rotation.z);
+        BlockCollider* col = const_cast<BlockCollider*>(getColliderAt(e.pos.x, e.pos.y, e.pos.z));
+        if (col) col->triColors = e.triColors;
+    }
+    ctx.needsRebuild = true;
+}
 
 static unsigned int sWheelVAO = 0, sWheelVBO = 0;
 
@@ -59,7 +116,7 @@ static void initColorWheel() {
     glGenBuffers(1, &sWheelVBO);
     glBindVertexArray(sWheelVAO);
     glBindBuffer(GL_ARRAY_BUFFER, sWheelVBO);
-    glBufferData(GL_ARRAY_BUFFER, 8 * 3 * 4 * sizeof(float), nullptr, GL_DYNAMIC_DRAW);
+    glBufferData(GL_ARRAY_BUFFER, 16 * 3 * 4 * sizeof(float), nullptr, GL_DYNAMIC_DRAW);
     // pos(2) + uv(2) = 4 floats per vertex
     glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)0);
     glEnableVertexAttribArray(0);
@@ -74,11 +131,11 @@ static void drawColorWheel(Shader* uiShader) {
     float cx = 1.0f;  // bottom-right corner
     float cy = -1.0f;
 
-    float verts[8 * 3 * 4]; // 8 triangles * 3 verts * 4 floats
+    float verts[16 * 3 * 4]; // 16 triangles * 3 verts * 4 floats
     int vi = 0;
-    for (int i = 0; i < 8; i++) {
-        float a1 = glm::radians(90.0f + i * 11.25f);
-        float a2 = glm::radians(90.0f + (i + 1) * 11.25f);
+    for (int i = 0; i < 16; i++) {
+        float a1 = glm::radians(90.0f + i * 5.625f);
+        float a2 = glm::radians(90.0f + (i + 1) * 5.625f);
 
         // center point
         verts[vi++] = cx; verts[vi++] = cy; verts[vi++] = 0; verts[vi++] = 0;
@@ -107,7 +164,7 @@ static void drawColorWheel(Shader* uiShader) {
     glBindVertexArray(sWheelVAO);
 
     // Draw each triangle slice
-    for (int i = 0; i < 8; i++) {
+    for (int i = 0; i < 16; i++) {
         glm::vec3 c = sColorWheel[i];
         float alpha = (i == sSelectedColor) ? 1.0f : 0.8f;
         glUniform4f(uiShader->loc("uColor"), c.r, c.g, c.b, alpha);
@@ -116,13 +173,13 @@ static void drawColorWheel(Shader* uiShader) {
 
     // Draw black outlines first
     glLineWidth(2.0f);
-    for (int i = 0; i < 8; i++) {
+    for (int i = 0; i < 16; i++) {
         if (i == sSelectedColor) continue;
         glUniform4f(uiShader->loc("uColor"), 0.0f, 0.0f, 0.0f, 1.0f);
         glDrawArrays(GL_LINE_LOOP, i * 3, 3);
     }
     // Draw selected slice and outline on top
-    if (sSelectedColor >= 0 && sSelectedColor < 8) {
+    if (sSelectedColor >= 0 && sSelectedColor < 16) {
         glm::vec3 c = sColorWheel[sSelectedColor];
         glUniform4f(uiShader->loc("uColor"), c.r, c.g, c.b, 1.0f);
         glDrawArrays(GL_TRIANGLES, sSelectedColor * 3, 3);
@@ -210,9 +267,13 @@ int getSelectedPaintColor() {
     return sSelectedColor;
 }
 
+void pushUndoSnapshot() {
+    pushUndo();
+}
+
 static void saveCurrentModel() {
     // Save palette
-    for (int i = 0; i < 8; i++)
+    for (int i = 0; i < 16; i++)
         sCurrentModel.palette[i] = sColorWheel[i];
 
     // Rebuild placements from current colliders
@@ -233,6 +294,64 @@ static void saveCurrentModel() {
     saveModel(sModelName, sCurrentModel);
 }
 
+static void openExportDialog() {
+    addUIGroup("export_dialog");
+
+    float dlgW = 0.5f;
+    float dlgH = 0.5f;
+    float dlgX = -dlgW / 2.0f;
+    float dlgY = -dlgH / 2.0f;
+    glm::vec4 bgColor = {0.1f, 0.1f, 0.1f, 0.98f};
+    glm::vec4 inputColor = {0.2f, 0.2f, 0.2f, 0.95f};
+
+    addToGroup("export_dialog", createPanel("export_bg",
+        dlgX, dlgY, dlgW, dlgH, bgColor));
+
+    float fieldW = dlgW - 0.04f;
+    float fieldX = dlgX + 0.02f;
+    float fieldH = 0.08f;
+    float y = dlgY + dlgH - 0.1f;
+
+    // Name input (default: current model name)
+    UIElement nameInput = createTextInput("exp_name",
+        fieldX, y, fieldW, fieldH, inputColor, "Name", 48);
+    nameInput.inputText = sModelName;
+    addToGroup("export_dialog", nameInput);
+    y -= fieldH + 0.03f;
+
+    // Path input (optional, defaults to assets/exports)
+    UIElement pathInput = createTextInput("exp_path",
+        fieldX, y, fieldW, fieldH, inputColor, "Path (optional)", 128);
+    addToGroup("export_dialog", pathInput);
+    y -= fieldH + 0.06f;
+
+    // Done button
+    addToGroup("export_dialog", createButton("exp_done",
+        fieldX, y, fieldW, fieldH,
+        {0.15f, 0.5f, 0.2f, 0.95f}, "Done",
+        []() {
+            std::string name = getInputText("export_dialog", "exp_name");
+            std::string path = getInputText("export_dialog", "exp_path");
+            if (name.empty()) return;
+            if (path.empty()) path = "assets/exports";
+            std::filesystem::create_directories(path);
+            std::string full = path + "/" + name + ".glb";
+            exportModelToGlb(full);
+            removeUIGroup("export_dialog");
+        }
+    ));
+    y -= fieldH + 0.02f;
+
+    // Cancel button
+    addToGroup("export_dialog", createButton("exp_cancel",
+        fieldX, y, fieldW, fieldH,
+        {0.3f, 0.15f, 0.15f, 0.95f}, "Cancel",
+        []() {
+            removeUIGroup("export_dialog");
+        }
+    ));
+}
+
 static void openPauseMenu() {
     sPaused = true;
 
@@ -251,7 +370,7 @@ static void openPauseMenu() {
     glm::vec4 btnColor = {0.15f, 0.15f, 0.15f, 0.95f};
 
     addToGroup("pause_menu", createButton("continue",
-        btnX, 0.05f, btnW, btnH, btnColor,
+        btnX, 0.14f, btnW, btnH, btnColor,
         "Continue",
         []() {
             sPaused = false;
@@ -260,8 +379,16 @@ static void openPauseMenu() {
         }
     ));
 
+    addToGroup("pause_menu", createButton("export_glb",
+        btnX, 0.01f, btnW, btnH, btnColor,
+        "Export As GLB",
+        []() {
+            openExportDialog();
+        }
+    ));
+
     addToGroup("pause_menu", createButton("exit",
-        btnX, -0.08f, btnW, btnH, btnColor,
+        btnX, -0.12f, btnW, btnH, btnColor,
         "Save & Exit",
         []() {
             saveCurrentModel();
@@ -298,8 +425,8 @@ void register3dModelerScene() {
             cubeDef.indexCount = 36;
             cubeDef.texturePath = nullptr;
             VE::loadMesh("_ghost", cubeDef);
-            registerMeshWithStates("cube", cubeVertices, 24, cubeIndices, 12);
-            registerMeshWithStates("wedge", wedgeVertices, 18, wedgeIndices, 8);
+            registerMeshWithStates("cube", cubeVertices, 24, cubeIndices, 12, nullptr, true);
+            registerMeshWithStates("wedge", wedgeVertices, 18, wedgeIndices, 8, nullptr, true);
 
             // Right sidebar
             float panelX = 0.6f;
@@ -419,10 +546,17 @@ void register3dModelerScene() {
                             btnX, actionBtnY, btnW, btnH,
                             {0.25f, 0.25f, 0.3f, 0.95f}, "Edit Object",
                             []() {
+                                // Don't allow editing prefab meshes
+                                const std::string& cur = sSlotMesh[sSelectedSlot];
+                                if (!cur.empty()) {
+                                    const RegisteredMesh* reg = getRegisteredMesh(cur.c_str());
+                                    if (reg && reg->isPrefab) return;
+                                }
+
                                 saveCurrentModel();
-                                std::string meshName = sSlotMesh[sSelectedSlot].empty()
+                                std::string meshName = cur.empty()
                                     ? "slot_" + std::to_string(sSelectedSlot)
-                                    : sSlotMesh[sSelectedSlot];
+                                    : cur;
                                 sPendingSlotUpdate = sSelectedSlot;
                                 sPendingSlotMesh = meshName;
                                 auto* editData = new VectorMeshEditData{meshName, sSelectedSlot, sModelName};
@@ -484,7 +618,7 @@ void register3dModelerScene() {
                                         float y = fieldsY;
                                         glm::vec4 inputColor = {0.2f, 0.2f, 0.2f, 0.95f};
 
-                                        glm::vec3 cur = (sSelectedColor >= 0 && sSelectedColor < 8)
+                                        glm::vec3 cur = (sSelectedColor >= 0 && sSelectedColor < 16)
                                             ? sColorWheel[sSelectedColor] : glm::vec3(0.6f);
                                         bool isDefault = (cur == glm::vec3(0.6f));
                                         float maxC = std::max({cur.r, cur.g, cur.b, 0.001f});
@@ -563,7 +697,7 @@ void register3dModelerScene() {
                                                     bri = brS.empty() ? 1.0f : std::clamp(std::stof(brS) / 255.0f, 0.0f, 1.0f);
                                                 }
 
-                                                if (sSelectedColor >= 0 && sSelectedColor < 8)
+                                                if (sSelectedColor >= 0 && sSelectedColor < 16)
                                                     sColorWheel[sSelectedColor] = glm::vec3(r, g, b) * bri;
 
                                                 setPaintPalette(sColorWheel);
@@ -610,9 +744,10 @@ void register3dModelerScene() {
                 std::string* name = static_cast<std::string*>(data);
                 sModelName = *name;
                 setMemoryPath("assets/saves/3dModels");
+                sUndoStack.clear();
                 if (loadModel(sModelName, sCurrentModel)) {
                     // Restore palette
-                    for (int i = 0; i < 8; i++)
+                    for (int i = 0; i < 16; i++)
                         sColorWheel[i] = sCurrentModel.palette[i];
                     setPaintPalette(sColorWheel);
 
@@ -689,6 +824,9 @@ void register3dModelerScene() {
         },
         // onExit
         []() {
+            // Auto-save on exit (window close or scene switch)
+            if (!sModelName.empty())
+                saveCurrentModel();
             cleanupHighlight();
             cleanupOverlay();
             delete sBlockSelectorPlus;
@@ -740,7 +878,7 @@ void register3dModelerScene() {
             // Scroll: build mode = cycle slots, paint mode = cycle colors
             if (ctx.scrollDelta != 0.0f && sEditorMode == 1) {
                 int dir = (ctx.scrollDelta > 0.0f) ? 1 : -1;
-                sSelectedColor = (sSelectedColor + dir + 8) % 8;
+                sSelectedColor = (sSelectedColor + dir + 16) % 16;
             }
             if (ctx.scrollDelta != 0.0f && sEditorMode == 0) {
                 int dir = (ctx.scrollDelta > 0.0f) ? -1 : 1;
@@ -749,6 +887,42 @@ void register3dModelerScene() {
                     setCurrentMesh(sSlotMesh[sSelectedSlot]);
                 rebuildSelectorIcons();
             }
+
+            // Ctrl+Tab: shortcut for Edit Object (build mode only) - fires on release
+            bool ctrlHeld = glfwGetKey(ctx.window, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS;
+            bool tabDown = glfwGetKey(ctx.window, GLFW_KEY_TAB) == GLFW_PRESS;
+            bool ctrlTab = ctrlHeld && tabDown;
+            if (!ctrlTab && sWasCtrlTabDown && sEditorMode == 0) {
+                const std::string& cur = sSlotMesh[sSelectedSlot];
+                bool isPrefab = false;
+                if (!cur.empty()) {
+                    const RegisteredMesh* reg = getRegisteredMesh(cur.c_str());
+                    if (reg && reg->isPrefab) isPrefab = true;
+                }
+                if (!isPrefab) {
+                    saveCurrentModel();
+                    std::string meshName = cur.empty()
+                        ? "slot_" + std::to_string(sSelectedSlot)
+                        : cur;
+                    sPendingSlotUpdate = sSelectedSlot;
+                    sPendingSlotMesh = meshName;
+                    auto* editData = new VectorMeshEditData{meshName, sSelectedSlot, sModelName};
+                    VE::setScene("vectorMesh", editData);
+                }
+            }
+            sWasCtrlTabDown = ctrlTab;
+
+            // Ctrl+Z: undo
+            bool zDown = glfwGetKey(ctx.window, GLFW_KEY_Z) == GLFW_PRESS;
+            bool ctrlZ = ctrlHeld && zDown;
+            if (ctrlZ && !sWasCtrlZDown) {
+                if (!sUndoStack.empty()) {
+                    UndoSnapshot s = sUndoStack.back();
+                    sUndoStack.pop_back();
+                    restoreSnapshot(s);
+                }
+            }
+            sWasCtrlZDown = ctrlZ;
 
             processUIInput();
         },

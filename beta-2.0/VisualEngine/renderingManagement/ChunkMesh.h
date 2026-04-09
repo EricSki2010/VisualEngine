@@ -15,6 +15,7 @@ struct RegisteredMesh {
     int indexCount;
     std::shared_ptr<Texture> texture;
     bool rectangular;
+    bool isPrefab = false;           // true = built-in prefab, not editable in vectorMesh
     // Per-triangle cull state: 0=never cull, 1=partial wall, 2=solid wall
     std::vector<int> triCullState;
     // Derived: which face directions have state 2 triangles
@@ -43,8 +44,9 @@ std::vector<MergedMeshEntry> buildSingleMeshes();  // SINGLE mode: full meshes, 
 void clearMeshData();
 const RegisteredMesh* getRegisteredMesh(const char* name);
 void setMeshSolidFaces(const char* name, bool faces[6]);
-void setPaintPalette(const glm::vec3 palette[8]);
+void setPaintPalette(const glm::vec3 palette[16]);
+const glm::vec3* getPaintPalette();
 // Register mesh with interleaved indices+state: v0,v1,v2,state, v0,v1,v2,state, ...
 void registerMeshWithStates(const char* name, float* vertices, int vertexCount,
                             unsigned int* interleavedIndices, int triCount,
-                            const char* texturePath = nullptr);
+                            const char* texturePath = nullptr, bool isPrefab = false);
