@@ -110,8 +110,8 @@
 `cleanupOverlay()`
   Deletes the overlay VAO/VBO.
 
-`drawTriangleOverlay(shader, triangle, color, alpha)`
-  Draws a single triangle as a semi-transparent overlay on top of existing geometry. Uses polygon offset to prevent z-fighting.
+`drawTriangleOverlay(shader, triangle, color, alpha, flatShade = true)`
+  Draws a single triangle as a semi-transparent overlay on top of existing geometry. Uses polygon offset to prevent z-fighting. `flatShade = true` forces full ambient (unlit) for bright selection highlights. Pass `false` to use scene lighting (e.g. for mesh preview triangles).
 
 `aabbFaceTriangle(box, faceIndex, half) -> Triangle`
   Converts one half of an AABB face into a triangle. faceIndex: 0=+X, 1=-X, 2=+Y, 3=-Y, 4=+Z, 5=-Z. half: 0 or 1 for the two triangles of the quad.
@@ -148,17 +148,23 @@
 `clearMeshData()`
   Clears both the mesh registry and draw list.
 
-`registerMeshWithStates(name, vertices, vertexCount, interleavedIndices, triCount, texturePath)`
-  Registers a mesh with per-triangle cull states. Index data is interleaved: v0,v1,v2,state for each triangle. States: 0=never cull, 1=partial wall (cull if neighbor has state 2), 2=solid wall (cull if neighbor has state 2).
+`registerMeshWithStates(name, vertices, vertexCount, interleavedIndices, triCount, texturePath = nullptr, isPrefab = false)`
+  Registers a mesh with per-triangle cull states. Index data is interleaved: v0,v1,v2,state for each triangle. States: 0=never cull, 1=partial wall (cull if neighbor has state 2), 2=solid wall (cull if neighbor has state 2). Pass `isPrefab = true` to flag built-in meshes that should not be opened in custom mesh editors.
 
 `setMeshSolidFaces(name, faces[6])`
   Manually sets which face directions are solid for culling.
 
-`setPaintPalette(palette[8])`
-  Sets the 8-color paint palette. Creates/updates a palette texture used for per-face coloring. Painted triangles are rendered as separate color-batched meshes using objectColor.
+`setPaintPalette(palette[16])`
+  Sets the 16-color paint palette. Creates/updates a palette texture used for per-face coloring. Painted triangles are rendered as separate color-batched meshes using objectColor.
+
+`getPaintPalette() -> const glm::vec3*`
+  Returns a pointer to the current 16-color paint palette.
 
 `RegisteredMesh.floatsPerVertex`
   5 = pos3+uv2 (normals computed), 8 = pos3+uv2+normal3 (pre-computed normals).
+
+`RegisteredMesh.isPrefab`
+  True for meshes registered with `isPrefab = true`. Used by editors to block editing built-in shapes.
 
 `RegisteredMesh.triCullState`
   Per-triangle cull state vector. Derived from interleaved index data.
@@ -339,8 +345,8 @@ rz -> 3
 `BlockPlacement { x, y, z, typeId, rx, ry, rz, triColors }`
   A placed block: position, which block type, rotation, and per-face/triangle paint palette indices.
 
-`ModelFile { blockTypes, placements, palette[8] }`
-  Complete model file containing block type definitions, all placements, and an 8-color paint palette.
+`ModelFile { blockTypes, placements, palette[16] }`
+  Complete model file containing block type definitions, all placements, and a 16-color paint palette.
 
 `saveModel(name, model) -> bool`
   Saves a ModelFile to `{memoryPath}/{name}.mdl`. Version 3 format with magic header, floatsPerVertex per block type, block types section (vertices, indices, face colors), placements section (with triColors), and palette.

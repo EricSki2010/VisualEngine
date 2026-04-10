@@ -21,7 +21,9 @@ Main editor scene with two modes: Build and Paint.
 - Ctrl+D: Delete selected blocks
 - Ctrl+A (block mode): Replace with current mesh
 - Ctrl+A (face mode): Extrude from selected faces
-- R + 1/2/3: Rotate selected blocks by 45° on X/Y/Z
+- R + 1/2/3: Rotate selected blocks by 90° on X/Y/Z
+- Ctrl+Z: Undo (50-step history)
+- Ctrl+Tab: Edit current slot in vectorMesh editor (skips prefabs)
 - Scroll: Cycle through mesh slots
 
 #### Paint Mode (sEditorMode = 1)
@@ -29,11 +31,12 @@ Main editor scene with two modes: Build and Paint.
 - Right-click: Select single triangle/face
 - Right-drag: Plane select (coplanar triangles, commit on release)
 - Ctrl+A: Paint selection with current palette color
-- Scroll: Cycle through 8 color slots
+- Ctrl+Z: Undo (50-step history)
+- Scroll: Cycle through 16 color slots
 - Shift: Additive selection. Ctrl: Subtractive selection.
 
 #### Color Wheel
-- 8 triangular slices in bottom-right corner (quarter circle, center at screen corner)
+- 16 triangular slices in bottom-right corner (quarter circle, center at screen corner)
 - Radius: 0.6 NDC
 - Selected slice: Yellow outline, drawn on top
 - Only visible in paint mode
@@ -49,7 +52,17 @@ Main editor scene with two modes: Build and Paint.
 #### Pause Menu
 - ESC toggles. Blocks all input except ESC and menu clicks.
 - Camera forced out of looking mode while paused.
-- "Continue" / "Save & Exit" buttons.
+- Buttons: Continue / Export As GLB / Save & Exit.
+
+#### Export Dialog
+- Opened from pause menu "Export As GLB" button.
+- **Name** input (pre-filled with current model name).
+- **Path** input (optional, defaults to `assets/exports`).
+- **Done**: writes `{path}/{name}.glb` via `exportModelToGlb`.
+- **Cancel**: closes dialog without exporting.
+
+#### Auto-Save
+- Current model is saved on scene exit / window close via the `onExit` handler.
 
 #### Model Save/Load
 - **Save:** Palette → `sCurrentModel.palette`. Colliders → placements (position, rotation, meshName, triColors). Writes `.mdl` v3.
@@ -71,12 +84,21 @@ Editor for creating custom meshes from dots, lines, and triangles.
 - **Line mode**: Select 2 dots → Ctrl+A to create edge. Ctrl+D to delete hovered line.
 - **Plane mode**: Select 3 dots → Ctrl+A to create triangle. Click triangle to select. "Flip Normal" button on selected triangle. Ctrl+D to delete.
 
+#### Triangle Preview
+- Triangles render with the winding order as placed (A→B→C). No auto
+  normal-detection heuristic. Use "Flip Normal" to override manually.
+- Front and back both drawn so triangles are visible from any angle.
+
 #### File Formats
 - **.vmesh**: Binary. Dots (vec3 array), lines (index pairs), triangles (index triples + flipped flag).
 - **.mesh export**: Converts triangles to pos3+uv2+normal3 vertices. "VN" magic header. Normals flipped for correct lighting. Each triangle gets 3 unique vertices.
 
 #### Pause Menu
 - "Continue", "Save Model" (saves .vmesh + exports .mesh), "Exit" (returns to 3dModeler or menu).
+
+#### Shortcuts
+- Ctrl+Z: Undo (50-step history across dots, lines, triangles, flips)
+- Ctrl+Tab: Save + export .mesh + return to 3dModeler
 
 ---
 
@@ -109,6 +131,16 @@ Stores starting triangle's normal and plane distance (`dot(normal, center)`). On
 
 ### Selection (`src/mechanics/Selection.cpp`)
 Simple vector storage of `SelectedFace { blockPos (ivec3), faceIndex (int) }`. Deduplicates on add.
+
+### GltfExporter (`src/mechanics/GltfExporter.cpp`)
+`exportModelToGlb(outPath)` — exports the current scene as a glTF Binary file.
+
+- Iterates all colliders, transforms vertices into world space (rotation + position baked).
+- Groups triangles into 17 buckets: 16 palette colors + 1 unpainted (uses neutral grey 0.8).
+- Each bucket becomes a separate glTF primitive with its own material.
+- Materials use `KHR_materials_unlit` so your engine applies its own lighting.
+- Writes a single `.glb` file (12-byte header + JSON chunk + BIN chunk).
+- Uses nlohmann/json (bundled in `beta-2.0/thirdparty/json.hpp`).
 
 ---
 
@@ -150,7 +182,9 @@ Passed from 3dModeler to vectorMesh scene on "Edit Object".
 | Tab | Toggle block select (purple) | — |
 | Ctrl+A | Replace (block) / Extrude (face) | Paint with current color |
 | Ctrl+D | Delete selected blocks | — |
-| R + 1/2/3 | Rotate 45° on X/Y/Z | — |
+| Ctrl+Z | Undo (50-step history) | Undo (50-step history) |
+| Ctrl+Tab | Edit current slot in vectorMesh | — |
+| R + 1/2/3 | Rotate 90° on X/Y/Z | — |
 | Scroll | Cycle mesh slots | Cycle color slots |
 | ESC | Pause menu | Pause menu |
 | Q | Toggle FPS camera | Toggle FPS camera |

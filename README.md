@@ -33,10 +33,12 @@ The application (modelEditor) is a tool for building, painting, and editing
 - Extrude new blocks from selected faces (Ctrl+A)
 - Delete blocks (Ctrl+D)
 - Replace blocks with a different mesh type (Ctrl+A in block select)
-- Rotate placed blocks in 45-degree increments on any axis (R + 1/2/3)
+- Rotate placed blocks in 90-degree increments on any axis (R + 1/2/3)
 - 15 mesh slots: 2 built-in (cube, wedge) + 13 custom slots
 - Scroll wheel to cycle through available meshes
 - Tab to toggle full-block selection mode
+- Ctrl+Z undo with 50-step history
+- Ctrl+Tab shortcut to edit the current slot in the vectorMesh editor
 
 ### Paint Mode
 - Select individual triangles on any mesh face
@@ -55,9 +57,12 @@ The application (modelEditor) is a tool for building, painting, and editing
 - Dot mode: place vertices with snap-to-edge (configurable snap count)
 - Line mode: connect dots into edges
 - Plane mode: create triangles from 3 dots
-- Flip triangle normals for correct lighting
+- Flip triangle normals manually when needed
 - Saves as .vmesh (editable) + .mesh (renderable with pre-computed normals)
 - Custom meshes appear in the block selector for placement
+- Ctrl+Z undo with 50-step history
+- Ctrl+Tab to save and return to the 3D modeler
+- Built-in prefab meshes (cube, wedge) are protected from editing
 
 ### File Management
 - Create new models (empty or from cube template, configurable size)
@@ -65,6 +70,13 @@ The application (modelEditor) is a tool for building, painting, and editing
 - Duplicate and delete model files from the menu
 - Models store: block types, placements, rotations, paint data, palette
 - Backward-compatible file format (v1, v2, v3)
+- Auto-save on window close or scene switch
+
+### Export
+- Export models to glTF Binary (.glb) via the pause menu
+- Per-color primitives using the KHR_materials_unlit extension
+- Baked world-space vertices with recomputed normals
+- Ready to load into any glTF-compatible engine for your own lighting
 
 ### General
 - Pause menu with save & exit
@@ -80,6 +92,7 @@ The application (modelEditor) is a tool for building, painting, and editing
 | `.mdl` | Model file (block types + placements + rotations + paint + palette) |
 | `.mesh` | Renderable mesh (vertices + indices + optional normals + optional texture) |
 | `.vmesh` | Vector mesh editor data (dots + lines + triangles, editable) |
+| `.glb` | Exported glTF Binary for use in other engines |
 
 ## Tech Stack
 
@@ -89,5 +102,6 @@ The application (modelEditor) is a tool for building, painting, and editing
 - GLM (math)
 - FreeType (font rendering)
 - stb_image (texture loading)
+- nlohmann/json (single-header, bundled in `beta-2.0/thirdparty/`)
 - CMake build system
 - MSVC compiler (Windows)
