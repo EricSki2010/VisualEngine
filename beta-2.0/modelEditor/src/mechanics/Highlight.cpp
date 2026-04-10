@@ -331,9 +331,9 @@ void renderHoverHighlight() {
     if (rHeld && sBlockSelectMode && !getSelection().empty()) {
         glm::vec3 addRot(0.0f);
         bool doRotate = false;
-        if (key1 && !sWas1Down) { addRot.x = 45.0f; doRotate = true; }
-        if (key2 && !sWas2Down) { addRot.y = 45.0f; doRotate = true; }
-        if (key3 && !sWas3Down) { addRot.z = 45.0f; doRotate = true; }
+        if (key1 && !sWas1Down) { addRot.x = 90.0f; doRotate = true; }
+        if (key2 && !sWas2Down) { addRot.y = 90.0f; doRotate = true; }
+        if (key3 && !sWas3Down) { addRot.z = 90.0f; doRotate = true; }
 
         if (doRotate) {
             pushUndoSnapshot();

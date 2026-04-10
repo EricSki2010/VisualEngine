@@ -828,19 +828,8 @@ void registerVectorMeshScene() {
                     t.dotC < (int)sPlacedDots.size()) {
                     Triangle tri = {sPlacedDots[t.dotA], sPlacedDots[t.dotB], sPlacedDots[t.dotC]};
 
-                    // Choose normal direction: outward = away from origin
-                    glm::vec3 center = (tri.v0 + tri.v1 + tri.v2) / 3.0f;
-                    glm::vec3 edge1 = tri.v1 - tri.v0;
-                    glm::vec3 edge2 = tri.v2 - tri.v0;
-                    glm::vec3 normal = glm::cross(edge1, edge2);
-                    float distWithNormal = glm::length(center + normal);
-                    float distWithoutNormal = glm::length(center);
-
+                    // Use winding order as placed; user can flip manually
                     Triangle front = tri;
-                    if (distWithNormal < distWithoutNormal)
-                        front = {tri.v0, tri.v2, tri.v1};
-
-                    // Apply manual flip
                     if (t.flipped)
                         front = {front.v0, front.v2, front.v1};
 
