@@ -34,19 +34,24 @@ static float wedgeVertices[] = {
      0.5f,  0.5f, -0.5f,  0.5f, 1.0f,  // 17
 };
 
-// Indices with cull state per triangle
-// Format: v0, v1, v2, state (0=never cull, 1=partial wall, 2=solid wall)
+// Indices with face direction per triangle
+// Format: v0, v1, v2, faceDir
+// faceDir: 0=+X, 1=-X, 2=+Y, 3=-Y, 4=+Z, 5=-Z, 0xFFFFFFFF=none
 static unsigned int wedgeIndices[] = {
-    // Bottom (solid wall)
-    0, 2, 1, 2,    2, 0, 3, 2,
-    // Back (solid wall)
-    4, 6, 5, 2,    6, 4, 7, 2,
-    // Slope (never cull - angled)
-    8, 10, 9, 0,   10, 8, 11, 0,
-    // Left (partial - on wall but not full)
+    // Bottom (-Y face)
+    0, 2, 1, 3,    2, 0, 3, 3,
+    // Back (-Z face)
+    4, 6, 5, 5,    6, 4, 7, 5,
+    // Slope (no face)
+    8, 10, 9, 0xFFFFFFFF,   10, 8, 11, 0xFFFFFFFF,
+    // Left (-X face, partial)
     12, 14, 13, 1,
-    // Right (partial - on wall but not full)
-    15, 17, 16, 1,
+    // Right (+X face, partial)
+    15, 17, 16, 0,
 };
 
-static const int wedgeIndexCount = 24; // actual triangle indices (excluding states)
+// Face states: 0=+X, 1=-X, 2=+Y, 3=-Y, 4=+Z, 5=-Z
+// Bottom(-Y)=solid, Back(-Z)=solid, Left(-X)/Right(+X)=partial
+static const int wedgeFaceStates[6] = {1, 1, 0, 2, 0, 2};
+
+static const int wedgeIndexCount = 24; // actual triangle indices (excluding faceDir)

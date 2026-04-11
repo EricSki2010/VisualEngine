@@ -37,16 +37,20 @@ static float cubeVertices[] = {
     -0.5f, -0.5f,  0.5f,  0.0f, 1.0f,
 };
 
-// Indices with cull state per triangle
-// Format: v0, v1, v2, state (0=never cull, 1=partial wall, 2=solid wall)
+// Indices with face direction per triangle
+// Format: v0, v1, v2, faceDir
+// faceDir: 0=+X, 1=-X, 2=+Y, 3=-Y, 4=+Z, 5=-Z
 static unsigned int cubeIndices[] = {
-     0,  1,  2, 2,    2,  3,  0, 2,  // +Z (solid)
-     4,  6,  5, 2,    6,  4,  7, 2,  // -Z (solid)
-     8,  9, 10, 2,   10, 11,  8, 2,  // -X (solid)
-    12, 13, 14, 2,   14, 15, 12, 2,  // +X (solid)
-    16, 17, 18, 2,   18, 19, 16, 2,  // +Y (solid)
-    20, 21, 22, 2,   22, 23, 20, 2,  // -Y (solid)
+     0,  1,  2, 4,    2,  3,  0, 4,  // +Z face
+     4,  6,  5, 5,    6,  4,  7, 5,  // -Z face
+     8,  9, 10, 1,   10, 11,  8, 1,  // -X face
+    12, 13, 14, 0,   14, 15, 12, 0,  // +X face
+    16, 17, 18, 2,   18, 19, 16, 2,  // +Y face
+    20, 21, 22, 3,   22, 23, 20, 3,  // -Y face
 };
+
+// Face states: 0=+X, 1=-X, 2=+Y, 3=-Y, 4=+Z, 5=-Z (all solid)
+static const int cubeFaceStates[6] = {2, 2, 2, 2, 2, 2};
 
 static const int cubeIndexCount = 36;
 

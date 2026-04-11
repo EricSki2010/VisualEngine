@@ -16,10 +16,10 @@ struct RegisteredMesh {
     std::shared_ptr<Texture> texture;
     bool rectangular;
     bool isPrefab = false;           // true = built-in prefab, not editable in vectorMesh
-    // Per-triangle cull state: 0=never cull, 1=partial wall, 2=solid wall
-    std::vector<int> triCullState;
-    // Derived: which face directions have state 2 triangles
-    bool solidFaces[6] = {false, false, false, false, false, false};
+    // Per-triangle face direction: 0=+X, 1=-X, 2=+Y, 3=-Y, 4=+Z, 5=-Z, -1=none
+    std::vector<int> triFaceDir;
+    // Per-face cull state: 0=none/open, 1=partial, 2=solid
+    int faceState[6] = {0, 0, 0, 0, 0, 0};
 };
 
 struct DrawInstance {
@@ -43,10 +43,12 @@ std::vector<MergedMeshEntry> buildMergedMeshes();  // CHUNK mode: face culling +
 std::vector<MergedMeshEntry> buildSingleMeshes();  // SINGLE mode: full meshes, no culling
 void clearMeshData();
 const RegisteredMesh* getRegisteredMesh(const char* name);
-void setMeshSolidFaces(const char* name, bool faces[6]);
 void setPaintPalette(const glm::vec3 palette[16]);
 const glm::vec3* getPaintPalette();
-// Register mesh with interleaved indices+state: v0,v1,v2,state, v0,v1,v2,state, ...
+// Register mesh with interleaved indices: v0,v1,v2,faceDir, ...
+// faceDir: 0=+X, 1=-X, 2=+Y, 3=-Y, 4=+Z, 5=-Z, 0xFFFFFFFF=none
+// faceStates: per-face cull state [6], 0=open, 1=partial, 2=solid (nullptr = all 0)
 void registerMeshWithStates(const char* name, float* vertices, int vertexCount,
                             unsigned int* interleavedIndices, int triCount,
+                            const int* faceStates = nullptr,
                             const char* texturePath = nullptr, bool isPrefab = false);

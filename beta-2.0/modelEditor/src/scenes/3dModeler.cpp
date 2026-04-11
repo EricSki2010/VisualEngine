@@ -425,8 +425,8 @@ void register3dModelerScene() {
             cubeDef.indexCount = 36;
             cubeDef.texturePath = nullptr;
             VE::loadMesh("_ghost", cubeDef);
-            registerMeshWithStates("cube", cubeVertices, 24, cubeIndices, 12, nullptr, true);
-            registerMeshWithStates("wedge", wedgeVertices, 18, wedgeIndices, 8, nullptr, true);
+            registerMeshWithStates("cube", cubeVertices, 24, cubeIndices, 12, cubeFaceStates, nullptr, true);
+            registerMeshWithStates("wedge", wedgeVertices, 18, wedgeIndices, 8, wedgeFaceStates, nullptr, true);
 
             // Right sidebar
             float panelX = 0.6f;
@@ -753,6 +753,10 @@ void register3dModelerScene() {
 
                     for (int i = 0; i < (int)sCurrentModel.blockTypes.size(); i++) {
                         const BlockTypeDef& bt = sCurrentModel.blockTypes[i];
+                        // Skip prefabs — already registered with correct face states
+                        const RegisteredMesh* existing = getRegisteredMesh(bt.name.c_str());
+                        if (existing && existing->isPrefab) continue;
+
                         if (bt.floatsPerVertex == 8) {
                             // VN mesh: load directly from .mesh file
                             std::string meshPath = "assets/saves/vectorMeshes/" + bt.name + ".mesh";
