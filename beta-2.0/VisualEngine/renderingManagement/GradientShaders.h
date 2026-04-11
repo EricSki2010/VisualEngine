@@ -1,7 +1,7 @@
 #pragma once
 
 static const char* gradientVertSrc = R"(
-#version 330 core
+#version 430 core
 layout (location = 0) in vec2 aPos;
 
 uniform mat4 uInvViewProj;
@@ -17,7 +17,7 @@ void main() {
 )";
 
 static const char* gradientFragSrc = R"(
-#version 330 core
+#version 430 core
 in vec3 vDir;
 
 uniform vec3 uTopColor;

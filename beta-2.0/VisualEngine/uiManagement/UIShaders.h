@@ -1,7 +1,7 @@
 #pragma once
 
 static const char* uiVertSrc = R"(
-#version 330 core
+#version 430 core
 layout (location = 0) in vec2 aPos;
 layout (location = 1) in vec2 aTexCoord;
 
@@ -18,7 +18,7 @@ void main() {
 )";
 
 static const char* uiFragSrc = R"(
-#version 330 core
+#version 430 core
 in vec2 TexCoord;
 
 uniform vec4 uColor;

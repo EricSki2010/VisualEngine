@@ -1,7 +1,7 @@
 #pragma once
 
 static const char* dotVertSrc = R"(
-#version 330 core
+#version 430 core
 layout (location = 0) in vec2 aPos;
 
 uniform vec3 uCenter;
@@ -20,7 +20,7 @@ void main() {
 )";
 
 static const char* dotFragSrc = R"(
-#version 330 core
+#version 430 core
 
 uniform vec3 uColor;
 uniform float uAlpha;

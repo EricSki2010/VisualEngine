@@ -1,7 +1,7 @@
 #pragma once
 
 static const char* lineVertSrc = R"(
-#version 330 core
+#version 430 core
 layout (location = 0) in vec3 aPos;
 
 uniform mat4 view;
@@ -13,7 +13,7 @@ void main() {
 )";
 
 static const char* lineFragSrc = R"(
-#version 330 core
+#version 430 core
 
 uniform vec3 uColor;
 
