@@ -1,7 +1,7 @@
 #pragma once
 
 static const char* textVertSrc = R"(
-#version 330 core
+#version 430 core
 layout (location = 0) in vec4 aVertex; // xy = position, zw = texcoord
 
 uniform vec2 uScreenSize;
@@ -18,7 +18,7 @@ void main() {
 )";
 
 static const char* textFragSrc = R"(
-#version 330 core
+#version 430 core
 in vec2 TexCoord;
 
 uniform sampler2D uGlyph;

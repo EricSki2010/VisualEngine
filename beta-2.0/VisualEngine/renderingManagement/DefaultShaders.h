@@ -1,7 +1,7 @@
 #pragma once
 
 static const char* defaultVertSrc = R"(
-#version 330 core
+#version 430 core
 layout (location = 0) in vec3 aPos;
 layout (location = 1) in vec2 aTexCoord;
 layout (location = 2) in vec3 aNormal;
@@ -24,7 +24,7 @@ void main() {
 )";
 
 static const char* defaultFragSrc = R"(
-#version 330 core
+#version 430 core
 in vec3 FragPos;
 in vec2 TexCoord;
 in vec3 Normal;
