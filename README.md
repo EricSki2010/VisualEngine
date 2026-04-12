@@ -7,10 +7,10 @@ The application (modelEditor) is a tool for building, painting, and editing
 
 ## What the Engine Can Do (VisualEngine)
 
-- OpenGL 3.3 rendering with Phong lighting (diffuse, specular, ambient)
+- OpenGL 4.3 rendering with Phong lighting (diffuse, specular, ambient)
 - Mesh registration from code or binary .mesh files
 - Per-instance mesh placement with position and rotation (degrees, any axis)
-- Automatic face culling between adjacent solid blocks
+- Face-pair culling: per-face states (solid/partial/open), rotation-aware, O(n) matching
 - Per-triangle collision detection via Moller-Trumbore ray-triangle intersection
 - AABB fast-path raycasting for rectangular meshes
 - FPS camera with mouse look (Q toggle) and WASD movement
@@ -33,7 +33,7 @@ The application (modelEditor) is a tool for building, painting, and editing
 - Extrude new blocks from selected faces (Ctrl+A)
 - Delete blocks (Ctrl+D)
 - Replace blocks with a different mesh type (Ctrl+A in block select)
-- Rotate placed blocks in 90-degree increments on any axis (R + 1/2/3)
+- Rotate placed blocks in 90-degree increments on any axis (R + 1/2/3) with rotation-aware face culling
 - 15 mesh slots: 2 built-in (cube, wedge) + 13 custom slots
 - Scroll wheel to cycle through available meshes
 - Tab to toggle full-block selection mode

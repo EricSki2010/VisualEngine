@@ -122,9 +122,10 @@ Handles all selection rendering and input for both Build and Paint modes.
 - **Hover (yellow)**: Single face/triangle under cursor
 
 #### Face Index Mapping
-Raycast returns face indices: 0=+X, 1=-X, 2=+Y, 3=-Y, 4=+Z, 5=-Z.
-Cube vertex data face order: +Z, -Z, -X, +X, +Y, -Y.
-Mapping table `meshToRayFace` in ChunkMesh.cpp translates between them.
+Face state indices: 0=+X, 1=-X, 2=+Y, 3=-Y, 4=+Z, 5=-Z.
+Raycast returns face indices in the same order.
+Each triangle is tagged with a `faceDir` (0-5 or -1=none) at mesh registration.
+Rotation is handled by `rotMap`: each local face direction is rotated to world space during the face-pair collection phase.
 
 #### Paint Plane Selection
 Stores starting triangle's normal and plane distance (`dot(normal, center)`). Only selects triangles with matching normal (dot product > 0.95) and plane distance (within 0.1f).
@@ -148,11 +149,16 @@ Simple vector storage of `SelectedFace { blockPos (ivec3), faceIndex (int) }`. D
 
 ### prefab_cube.h
 24 vertices (4 per face), 5 floats each (pos3+uv2). Centered at origin, 1×1×1.
-Indices with cull states: 0=never cull, 1=partial wall, 2=solid wall.
+Index format: `v0, v1, v2, faceDir` per triangle.
+All faces assigned to their direction (0=+X through 5=-Z).
+Face states: all 6 faces = state 2 (solid).
 Plain indices version for ghost block rendering.
 
 ### prefab_wedge.h
 18 vertices, 8 triangles. Wedge/ramp shape.
+Face states: bottom(-Y)=2, back(-Z)=2, left(-X)=1, right(+X)=1, slope/top=0.
+Slope and triangular side faces have faceDir=none (0xFFFFFFFF) — invisible to culling.
+Left/right partial faces (state 1) are culled when adjacent to a state 2 face.
 
 ### EmbeddedSelectors.h
 Embedded 32×32 PNG data for "+" (empty slot) and "-" (selected slot) icons.

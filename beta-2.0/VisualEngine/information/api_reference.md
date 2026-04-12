@@ -140,7 +140,10 @@
   Clears all draw instances.
 
 `buildSingleMeshes() -> vector<MergedMeshEntry>`
-  Merges all instances of each mesh type into one draw call with neighbor-based face culling. Adjacent faces between blocks are removed. Vertices are rotated per-instance. Painted triangles are split into separate per-color meshes with objectColor set. Face culling is skipped for rotated instances.
+  Face-pair culling mesh builder. Three phases:
+  1. **Collect**: Gathers all faces with state 1/2 into a flat list with world-space directions (rotation applied via rotMap).
+  2. **Match**: Hashes faces by (position, direction), finds pairs at shared boundaries. Rules: 2v2 → cull both, 1v2 → cull the 1, 1v1 → nothing.
+  3. **Emit**: Per triangle, check cull set with O(1) lookup. Painted triangles go to per-color buckets.
 
 `buildMergedMeshes() -> vector<MergedMeshEntry>`
   Placeholder for future chunk-based meshing. Currently forwards to buildSingleMeshes.
@@ -148,11 +151,8 @@
 `clearMeshData()`
   Clears both the mesh registry and draw list.
 
-`registerMeshWithStates(name, vertices, vertexCount, interleavedIndices, triCount, texturePath = nullptr, isPrefab = false)`
-  Registers a mesh with per-triangle cull states. Index data is interleaved: v0,v1,v2,state for each triangle. States: 0=never cull, 1=partial wall (cull if neighbor has state 2), 2=solid wall (cull if neighbor has state 2). Pass `isPrefab = true` to flag built-in meshes that should not be opened in custom mesh editors.
-
-`setMeshSolidFaces(name, faces[6])`
-  Manually sets which face directions are solid for culling.
+`registerMeshWithStates(name, vertices, vertexCount, interleavedIndices, triCount, faceStates = nullptr, texturePath = nullptr, isPrefab = false)`
+  Registers a mesh with per-triangle face directions and per-face cull states. Index data is interleaved: v0,v1,v2,faceDir for each triangle. faceDir: 0=+X, 1=-X, 2=+Y, 3=-Y, 4=+Z, 5=-Z, 0xFFFFFFFF=none. faceStates is a 6-element array of cull states per face direction: 0=open (invisible to culling), 1=partial (culled by neighbor's 2), 2=solid (culls neighbor's 1 or 2). Pass `isPrefab = true` to flag built-in meshes.
 
 `setPaintPalette(palette[16])`
   Sets the 16-color paint palette. Creates/updates a palette texture used for per-face coloring. Painted triangles are rendered as separate color-batched meshes using objectColor.
@@ -166,11 +166,11 @@
 `RegisteredMesh.isPrefab`
   True for meshes registered with `isPrefab = true`. Used by editors to block editing built-in shapes.
 
-`RegisteredMesh.triCullState`
-  Per-triangle cull state vector. Derived from interleaved index data.
+`RegisteredMesh.triFaceDir`
+  Per-triangle face direction vector. Maps each triangle to a face (0-5) or -1 (no face).
 
-`RegisteredMesh.solidFaces[6]`
-  Auto-derived from state 2 triangles. Used for neighbor culling checks.
+`RegisteredMesh.faceState[6]`
+  Per-face cull state: 0=open, 1=partial, 2=solid. Set by registerMeshWithStates or auto-set to 2 for rectangular meshes.
 
 
 ## COLLISION
