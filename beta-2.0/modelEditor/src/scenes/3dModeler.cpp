@@ -1,7 +1,8 @@
 #include "3dModeler.h"
-#include "../mechanics/Highlight.h"
-#include "../mechanics/Selection.h"
-#include "../mechanics/GltfExporter.h"
+#include "../mechanics/interaction/Highlight.h"
+#include "../mechanics/interaction/Selection.h"
+#include "../mechanics/export/GltfExporter.h"
+#include "../mechanics/export/TexturePacking.h"
 #include "../../../VisualEngine/VisualEngine.h"
 #include "../../../VisualEngine/EngineGlobals.h"
 #include "../../../VisualEngine/inputManagement/Camera.h"
@@ -12,12 +13,12 @@
 #include "../../../VisualEngine/uiManagement/EmbeddedFont.h"
 #include "../../../VisualEngine/memoryManagement/memory.h"
 #include "../../../VisualEngine/inputManagement/Collision.h"
-#include "../../../VisualEngine/renderingManagement/ChunkMesh.h"
+#include "../../../VisualEngine/renderingManagement/meshing/ChunkMesh.h"
 #include "../../../VisualEngine/inputManagement/Raycasting.h"
-#include "../../../VisualEngine/renderingManagement/LineRenderer.h"
-#include "../../../VisualEngine/renderingManagement/DotRenderer.h"
-#include "../../../VisualEngine/renderingManagement/Overlay.h"
-#include "../../../VisualEngine/renderingManagement/RenderToTexture.h"
+#include "../../../VisualEngine/renderingManagement/primitives/LineRenderer.h"
+#include "../../../VisualEngine/renderingManagement/primitives/DotRenderer.h"
+#include "../../../VisualEngine/renderingManagement/meshing/Overlay.h"
+#include "../../../VisualEngine/renderingManagement/effects/RenderToTexture.h"
 #include <cmath>
 #include <functional>
 #include <algorithm>
@@ -33,6 +34,7 @@ static bool sPaused = false;
 static bool sWasEscDown = false;
 static bool sWasCtrlTabDown = false;
 static bool sWasCtrlZDown = false;
+static bool sWasF5Down = false;
 static bool sWasLeftDown = false;
 static Texture* sBlockSelectorPlus = nullptr;
 static Texture* sBlockSelectorMinus = nullptr;
@@ -927,6 +929,36 @@ void register3dModelerScene() {
                 }
             }
             sWasCtrlZDown = ctrlZ;
+
+            // F5: test texture packing
+            bool f5Down = glfwGetKey(ctx.window, GLFW_KEY_F5) == GLFW_PRESS;
+            if (f5Down && !sWasF5Down) {
+                // Test: 4 verts making 2 triangles, red and blue
+                std::vector<glm::vec2> verts = {
+                    {0.5f, 0.0f},   // a (0)
+                    {1.0f, 0.0f},   // b (1)
+                    {1.0f, 0.75f},  // c (2)
+                    {0.0f, 0.6f},   // d (3)
+                };
+                std::vector<uint32_t> indices = {
+                    0, 1, 2,  // a,b,c
+                    0, 2, 3,  // a,c,d
+                };
+                std::vector<glm::vec3> colors = {
+                    {1.0f, 0.0f, 0.0f}, // red (a,b,c)
+                    {0.0f, 0.0f, 1.0f}, // blue (a,c,d)
+                };
+                auto pngBytes = packTrianglesToPNG(verts, indices, colors, 128);
+                if (!pngBytes.empty()) {
+                    std::filesystem::create_directories("assets/exports");
+                    std::ofstream out("assets/exports/test_packing.png", std::ios::binary);
+                    out.write((const char*)pngBytes.data(), pngBytes.size());
+                    std::cout << "[Test] Wrote test_packing.png (" << pngBytes.size() << " bytes)" << std::endl;
+                } else {
+                    std::cout << "[Test] packTrianglesToPNG returned empty" << std::endl;
+                }
+            }
+            sWasF5Down = f5Down;
 
             processUIInput();
         },

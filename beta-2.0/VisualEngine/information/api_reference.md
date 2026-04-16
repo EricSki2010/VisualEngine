@@ -1,11 +1,37 @@
 # VisualEngine API Reference
 
+## Folder Structure
+
+```
+VisualEngine/
+├── VisualEngine.h / .cpp          — Public API
+├── EngineGlobals.h                — Global context struct
+├── renderingManagement/
+│   ├── render.h                   — Shader, Scene, Texture, Mesh classes
+│   ├── DefaultShaders.h           — Lit/textured shader source
+│   ├── Shader.cpp, Scene.cpp, Texture.cpp, Mesh.cpp
+│   ├── RenderLoop.cpp/h           — Frame loop: input → update → render
+│   ├── meshing/
+│   │   ├── ChunkMesh.cpp/h        — Face-pair culling, mesh merging
+│   │   └── Overlay.cpp/h          — Triangle overlays for selection
+│   ├── primitives/
+│   │   ├── LineRenderer.cpp/h     — 3D line drawing
+│   │   └── DotRenderer.cpp/h      — Billboard point drawing
+│   └── effects/
+│       ├── GradientBackground.cpp/h   — Screen-space gradient backdrop
+│       └── RenderToTexture.cpp/h      — Framebuffer utilities
+├── inputManagement/               — Camera, Collision, Raycasting
+├── uiManagement/                  — UI system, text rendering
+├── sceneManagement/               — Scene lifecycle
+└── memoryManagement/              — Save/load, model files
+```
+
 ## PUBLIC API
 **Header:** `VisualEngine/VisualEngine.h`
 **Implementation:** `VisualEngine/VisualEngine.cpp`
 
 `VE::initWindow(width, height, title, maximized = false) -> bool`
-  Creates a window with OpenGL 3.3 context. Initializes shader, scene, and input. Pass `true` for maximized to fill the screen.
+  Creates a window with OpenGL 4.3 context. Initializes shader, scene, and input. Pass `true` for maximized to fill the screen.
 
 `VE::setCamera(x, y, z, yaw, pitch)`
   Sets camera position and orientation.
@@ -101,8 +127,8 @@
 
 
 ## OVERLAY
-**Header:** `VisualEngine/renderingManagement/Overlay.h`
-**Implementation:** `VisualEngine/renderingManagement/Overlay.cpp`
+**Header:** `VisualEngine/renderingManagement/meshing/Overlay.h`
+**Implementation:** `VisualEngine/renderingManagement/meshing/Overlay.cpp`
 
 `initOverlay()`
   Creates a reusable VAO/VBO for drawing single-triangle overlays.
@@ -118,8 +144,8 @@
 
 
 ## MESH BUILDING
-**Header:** `VisualEngine/renderingManagement/ChunkMesh.h`
-**Implementation:** `VisualEngine/renderingManagement/ChunkMesh.cpp`
+**Header:** `VisualEngine/renderingManagement/meshing/ChunkMesh.h`
+**Implementation:** `VisualEngine/renderingManagement/meshing/ChunkMesh.cpp`
 
 `registerMesh(name, MeshDef)`
   Stores mesh vertex/index data in the internal registry.
@@ -453,8 +479,8 @@ rz -> 3
 
 
 ## LINE RENDERER
-**Header:** `VisualEngine/renderingManagement/LineRenderer.h`
-**Implementation:** `VisualEngine/renderingManagement/LineRenderer.cpp`
+**Header:** `VisualEngine/renderingManagement/primitives/LineRenderer.h`
+**Implementation:** `VisualEngine/renderingManagement/primitives/LineRenderer.cpp`
 
 `initLineRenderer()`
   Creates VAO/VBO and compiles the line shader.
@@ -470,8 +496,8 @@ rz -> 3
 
 
 ## DOT RENDERER
-**Header:** `VisualEngine/renderingManagement/DotRenderer.h`
-**Implementation:** `VisualEngine/renderingManagement/DotRenderer.cpp`
+**Header:** `VisualEngine/renderingManagement/primitives/DotRenderer.h`
+**Implementation:** `VisualEngine/renderingManagement/primitives/DotRenderer.cpp`
 
 `initDotRenderer()`
   Creates a billboard quad VAO/VBO and compiles the dot shader.
@@ -484,8 +510,8 @@ rz -> 3
 
 
 ## RENDER TO TEXTURE
-**Header:** `VisualEngine/renderingManagement/RenderToTexture.h`
-**Implementation:** `VisualEngine/renderingManagement/RenderToTexture.cpp`
+**Header:** `VisualEngine/renderingManagement/effects/RenderToTexture.h`
+**Implementation:** `VisualEngine/renderingManagement/effects/RenderToTexture.cpp`
 
 `RenderTarget { fbo, textureId, depthRbo, width, height }`
   Framebuffer object with color texture and depth buffer.
@@ -504,8 +530,8 @@ rz -> 3
 
 
 ## GRADIENT BACKGROUND
-**Header:** `VisualEngine/renderingManagement/GradientBackground.h`
-**Implementation:** `VisualEngine/renderingManagement/GradientBackground.cpp`
+**Header:** `VisualEngine/renderingManagement/effects/GradientBackground.h`
+**Implementation:** `VisualEngine/renderingManagement/effects/GradientBackground.cpp`
 
 `initGradientBackground()`
   Creates fullscreen quad and compiles gradient shader. Called automatically by engine init.

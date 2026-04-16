@@ -1,7 +1,7 @@
 #include "DotRenderer.h"
 #include "DotShaders.h"
-#include "render.h"
-#include "../EngineGlobals.h"
+#include "../render.h"
+#include "../../EngineGlobals.h"
 
 static unsigned int sDotVAO = 0;
 static unsigned int sDotVBO = 0;

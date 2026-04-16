@@ -1,6 +1,6 @@
 # VisualEngine + Model Editor
 
-A custom OpenGL 3.3 voxel-style 3D model editor built from scratch in C++.
+A custom OpenGL 4.3 voxel-style 3D model editor built from scratch in C++.
 The engine (VisualEngine) handles rendering, input, collision, and UI.
 The application (modelEditor) is a tool for building, painting, and editing
 3D models made of blocks and custom shapes.
@@ -77,6 +77,7 @@ The application (modelEditor) is a tool for building, painting, and editing
 - Per-color primitives using the KHR_materials_unlit extension
 - Baked world-space vertices with recomputed normals
 - Ready to load into any glTF-compatible engine for your own lighting
+- Texture packing utility: rasterize 2D triangle groups (with per-triangle colors) into square PNG buffers with conservative coverage — no missing pixels at edges
 
 ### General
 - Pause menu with save & exit
@@ -97,11 +98,38 @@ The application (modelEditor) is a tool for building, painting, and editing
 ## Tech Stack
 
 - C++17
-- OpenGL 3.3 Core Profile
+- OpenGL 4.3 Core Profile
 - GLFW (windowing + input)
 - GLM (math)
 - FreeType (font rendering)
 - stb_image (texture loading)
+- stb_image_write (PNG writing for texture export)
 - nlohmann/json (single-header, bundled in `beta-2.0/thirdparty/`)
 - CMake build system
 - MSVC compiler (Windows)
+
+## Project Structure
+
+```
+beta-2.0/
+├── VisualEngine/               — Engine library
+│   ├── VisualEngine.h/.cpp     — Public API
+│   ├── EngineGlobals.h         — Global state
+│   ├── renderingManagement/
+│   │   ├── (core)              — Shader, Scene, Texture, Mesh, RenderLoop
+│   │   ├── meshing/            — ChunkMesh (face-pair culling), Overlay
+│   │   ├── primitives/         — LineRenderer, DotRenderer
+│   │   └── effects/            — GradientBackground, RenderToTexture
+│   ├── inputManagement/        — Camera, Collision, Raycasting
+│   ├── uiManagement/           — UI system, text rendering
+│   ├── sceneManagement/        — Scene lifecycle
+│   └── memoryManagement/       — Save/load, model files
+├── modelEditor/                — Editor application
+│   └── src/
+│       ├── scenes/             — 3dModeler, vectorMesh, menu, createScene
+│       ├── mechanics/
+│       │   ├── interaction/    — Highlight, Selection
+│       │   └── export/         — GltfExporter, TexturePacking
+│       └── prefabs/            — Built-in meshes (cube, wedge)
+└── thirdparty/                 — Bundled headers (json.hpp, stb_image_write.h)
+```

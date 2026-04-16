@@ -1,10 +1,11 @@
 #pragma once
 
-#include "render.h"
-#include "../VisualEngine.h"
+#include "../render.h"
+#include "../../VisualEngine.h"
 #include <vector>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <memory>
 
 struct RegisteredMesh {
@@ -52,3 +53,29 @@ void registerMeshWithStates(const char* name, float* vertices, int vertexCount,
                             unsigned int* interleavedIndices, int triCount,
                             const int* faceStates = nullptr,
                             const char* texturePath = nullptr, bool isPrefab = false);
+
+// ── Face culling helpers (shared by buildSingleMeshes + exporter) ──
+//
+// FaceKey identifies one face of one block by (block position, world-space
+// face direction in cardinal index 0..5: 0=+X 1=-X 2=+Y 3=-Y 4=+Z 5=-Z).
+struct FaceKey {
+    glm::ivec3 pos;
+    int face;
+    bool operator==(const FaceKey& o) const { return pos == o.pos && face == o.face; }
+};
+struct FaceKeyHash {
+    size_t operator()(const FaceKey& k) const {
+        return std::hash<int>()(k.pos.x) ^ (std::hash<int>()(k.pos.y) << 10)
+             ^ (std::hash<int>()(k.pos.z) << 20) ^ (std::hash<int>()(k.face) << 28);
+    }
+};
+using FaceCullSet = std::unordered_set<FaceKey, FaceKeyHash>;
+
+// Build a 90-degree-aligned rotation map: rotMap[localFace] = worldFace.
+// Returns false if `rotation` is not a multiple of 90 degrees on each axis.
+bool buildFaceRotMap(const glm::vec3& rotation, int rotMap[6]);
+
+// Walks gDrawList + registered face states, computes which (pos, worldFace)
+// pairs are hidden by adjacent neighbors. Same logic that buildSingleMeshes
+// uses internally; exposed so the exporter can reuse it.
+FaceCullSet computeFaceCullSet();

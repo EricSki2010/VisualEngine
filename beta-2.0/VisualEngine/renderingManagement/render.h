@@ -63,16 +63,27 @@ public:
     int indexCount;
     Texture* texture;
     glm::vec3 color = glm::vec3(0.8f);
+    bool vertexColored = false; // true when built from pos+normal+color stream
 
     Mesh(float* vertices, int vertexCount, unsigned int* indices, int indexCount);
     Mesh(float* verticesWithNormals, int vertexCount, unsigned int* indices, int indexCount, bool hasNormals);
     ~Mesh();
+
+    // Vertex-colored mesh factory. Input is interleaved pos3 + normal3 + color3
+    // (9 floats per vertex). Built mesh must be drawn with the engine's
+    // vertex-colored shader (ctx.vcShader). Returns a heap-allocated Mesh —
+    // caller owns it.
+    static Mesh* createVertexColored(const float* verticesPosNormalColor,
+                                     int vertexCount,
+                                     const unsigned int* indices,
+                                     int indexCount);
     Mesh(const Mesh&) = delete;
     Mesh& operator=(const Mesh&) = delete;
     void setTexture(Texture* tex);
     void setColor(glm::vec3 col);
     void draw(Shader& shader);
 private:
+    Mesh() = default; // used by createVertexColored
     void computeNormals(float* vertices, int vertexCount, unsigned int* indices, int indexCount,
                         float* outBuffer);
 };

@@ -1,7 +1,7 @@
 #pragma once
 
-#include "render.h"
-#include "../inputManagement/Collision.h"
+#include "../render.h"
+#include "../../inputManagement/Collision.h"
 
 void initOverlay();
 void cleanupOverlay();

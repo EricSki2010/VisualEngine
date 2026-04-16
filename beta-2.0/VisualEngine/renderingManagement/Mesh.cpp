@@ -113,6 +113,38 @@ Mesh::Mesh(float* verticesWithNormals, int vertCount, unsigned int* indices, int
     glBindVertexArray(0);
 }
 
+Mesh* Mesh::createVertexColored(const float* verts, int vertCount,
+                                const unsigned int* indices, int idxCount) {
+    Mesh* m = new Mesh();
+    m->indexCount = idxCount;
+    m->texture = nullptr;
+    m->color = glm::vec3(1.0f);
+    m->vertexColored = true;
+
+    glGenVertexArrays(1, &m->VAO);
+    glGenBuffers(1, &m->VBO);
+    glGenBuffers(1, &m->EBO);
+
+    glBindVertexArray(m->VAO);
+
+    glBindBuffer(GL_ARRAY_BUFFER, m->VBO);
+    glBufferData(GL_ARRAY_BUFFER, vertCount * 9 * sizeof(float), verts, GL_STATIC_DRAW);
+
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m->EBO);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, idxCount * sizeof(unsigned int), indices, GL_STATIC_DRAW);
+
+    // Layout matches vertexColoredVertSrc: pos(0) normal(1) color(2)
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 9 * sizeof(float), (void*)0);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 9 * sizeof(float), (void*)(3 * sizeof(float)));
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, 9 * sizeof(float), (void*)(6 * sizeof(float)));
+    glEnableVertexAttribArray(2);
+
+    glBindVertexArray(0);
+    return m;
+}
+
 Mesh::~Mesh() {
     glDeleteVertexArrays(1, &VAO);
     glDeleteBuffers(1, &VBO);
@@ -130,7 +162,10 @@ void Mesh::setColor(glm::vec3 col) {
 void Mesh::draw(Shader& shader) {
     glUniform1f(shader.loc("alpha"), 1.0f);
 
-    if (texture) {
+    if (vertexColored) {
+        // Vertex-colored shader has no textureSampler / useTexture / objectColor.
+        // Color comes from the per-vertex stream; nothing extra to upload here.
+    } else if (texture) {
         texture->bind(0);
         glUniform1i(shader.loc("textureSampler"), 0);
         glUniform1i(shader.loc("useTexture"), 1);

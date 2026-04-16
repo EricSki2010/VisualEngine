@@ -1,5 +1,5 @@
 #include "RenderToTexture.h"
-#include "render.h"
+#include "../render.h"
 
 RenderTarget createRenderTarget(int width, int height) {
     RenderTarget rt;

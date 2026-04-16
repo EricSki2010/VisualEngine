@@ -1,7 +1,7 @@
 #include "LineRenderer.h"
 #include "LineShaders.h"
-#include "render.h"
-#include "../EngineGlobals.h"
+#include "../render.h"
+#include "../../EngineGlobals.h"
 
 static unsigned int sLineVAO = 0;
 static unsigned int sLineVBO = 0;

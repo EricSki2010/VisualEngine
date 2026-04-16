@@ -3,7 +3,7 @@
 #include "sceneManagement/SceneManager.h"
 #include "renderingManagement/DefaultShaders.h"
 #include "renderingManagement/RenderLoop.h"
-#include "renderingManagement/GradientBackground.h"
+#include "renderingManagement/effects/GradientBackground.h"
 #include "inputManagement/Camera.h"
 #include "inputManagement/Collision.h"
 #include <iostream>
@@ -59,6 +59,7 @@ bool initWindow(int width, int height, const char* title, bool maximized) {
     glViewport(0, 0, ctx.width, ctx.height);
 
     ctx.shader = std::make_unique<Shader>(defaultVertSrc, defaultFragSrc);
+    ctx.vcShader = std::make_unique<Shader>(vertexColoredVertSrc, vertexColoredFragSrc);
     ctx.scene = std::make_unique<Scene>((float)ctx.width / (float)ctx.height);
     initGradientBackground();
 
@@ -170,6 +171,7 @@ void run() {
     if (!ctx.window || !ctx.shader || !ctx.scene) return;
 
     ctx.scene->uploadStaticUniforms(*ctx.shader);
+    if (ctx.vcShader) ctx.scene->uploadStaticUniforms(*ctx.vcShader);
     double lastTime = glfwGetTime();
 
     rebuild();
@@ -196,6 +198,7 @@ void run() {
     cleanupGradientBackground();
     ctx.scene.reset();
     ctx.shader.reset();
+    ctx.vcShader.reset();
     glfwTerminate();
 
     ctx.window = nullptr;

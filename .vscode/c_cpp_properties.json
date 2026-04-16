@@ -4,6 +4,7 @@
             "name": "Win32",
             "includePath": [
                 "${workspaceFolder}/**",
+                "${workspaceFolder}/beta-2.0/thirdparty",
                 "E:/glfw-3.4.bin.WIN64/glfw-3.4.bin.WIN64/include",
                 "E:/glad/include",
                 "C:/vcpkg/installed/x64-windows/include"

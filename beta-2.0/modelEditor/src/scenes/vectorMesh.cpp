@@ -3,9 +3,9 @@
 #include "../../../VisualEngine/EngineGlobals.h"
 #include "../../../VisualEngine/inputManagement/Camera.h"
 #include "../../../VisualEngine/inputManagement/Raycasting.h"
-#include "../../../VisualEngine/renderingManagement/LineRenderer.h"
-#include "../../../VisualEngine/renderingManagement/DotRenderer.h"
-#include "../../../VisualEngine/renderingManagement/Overlay.h"
+#include "../../../VisualEngine/renderingManagement/primitives/LineRenderer.h"
+#include "../../../VisualEngine/renderingManagement/primitives/DotRenderer.h"
+#include "../../../VisualEngine/renderingManagement/meshing/Overlay.h"
 #include "../../../VisualEngine/inputManagement/Collision.h"
 #include "../../../VisualEngine/uiManagement/UIManager.h"
 #include "../../../VisualEngine/uiManagement/UIRenderer.h"
@@ -13,7 +13,7 @@
 #include "../../../VisualEngine/uiManagement/TextRenderer.h"
 #include "../../../VisualEngine/uiManagement/EmbeddedFont.h"
 #include "SceneData.h"
-#include "../../../VisualEngine/renderingManagement/ChunkMesh.h"
+#include "../../../VisualEngine/renderingManagement/meshing/ChunkMesh.h"
 #include "../../../VisualEngine/memoryManagement/memory.h"
 #include <vector>
 #include <string>
@@ -110,6 +110,11 @@ static void exportVMeshToMesh() {
             glm::vec3 vb = sPlacedDots[t.dotB];
             glm::vec3 vc = sPlacedDots[t.dotC];
 
+            // Blanket flip: user's natural click convention is CW from their
+            // viewing angle, so RH cross points inward. Negate on save so
+            // stored normal points outward by default. Per-triangle override
+            // via the Flip Normal button (swaps winding + negates normal
+            // again for the oddball triangles).
             glm::vec3 normal = glm::cross(vb - va, vc - va);
             if (t.flipped) {
                 std::swap(vb, vc);

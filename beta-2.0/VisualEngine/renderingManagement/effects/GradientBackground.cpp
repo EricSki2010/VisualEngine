@@ -1,7 +1,7 @@
 #include "GradientBackground.h"
 #include "GradientShaders.h"
-#include "render.h"
-#include "../EngineGlobals.h"
+#include "../render.h"
+#include "../../EngineGlobals.h"
 
 static unsigned int sGradVAO = 0;
 static unsigned int sGradVBO = 0;

@@ -17,13 +17,13 @@ add_executable(modelEditor
     ../VisualEngine/renderingManagement/Scene.cpp
     ../VisualEngine/renderingManagement/Shader.cpp
     ../VisualEngine/renderingManagement/Texture.cpp
-    ../VisualEngine/renderingManagement/ChunkMesh.cpp
-    ../VisualEngine/renderingManagement/Overlay.cpp
-    ../VisualEngine/renderingManagement/LineRenderer.cpp
-    ../VisualEngine/renderingManagement/DotRenderer.cpp
-    ../VisualEngine/renderingManagement/GradientBackground.cpp
-    ../VisualEngine/renderingManagement/RenderToTexture.cpp
     ../VisualEngine/renderingManagement/RenderLoop.cpp
+    ../VisualEngine/renderingManagement/meshing/ChunkMesh.cpp
+    ../VisualEngine/renderingManagement/meshing/Overlay.cpp
+    ../VisualEngine/renderingManagement/primitives/LineRenderer.cpp
+    ../VisualEngine/renderingManagement/primitives/DotRenderer.cpp
+    ../VisualEngine/renderingManagement/effects/GradientBackground.cpp
+    ../VisualEngine/renderingManagement/effects/RenderToTexture.cpp
     ../VisualEngine/sceneManagement/SceneManager.cpp
     ../VisualEngine/memoryManagement/memory.cpp
     ../VisualEngine/uiManagement/UIRenderer.cpp
@@ -33,11 +33,12 @@ add_executable(modelEditor
     ../VisualEngine/inputManagement/Camera.cpp
     ../VisualEngine/inputManagement/Collision.cpp
     ../VisualEngine/inputManagement/Raycasting.cpp
-    src/mechanics/Highlight.cpp
-    src/mechanics/Selection.cpp
     src/mechanics/scenes.cpp
     src/mechanics/setup.cpp
-    src/mechanics/GltfExporter.cpp
+    src/mechanics/interaction/Highlight.cpp
+    src/mechanics/interaction/Selection.cpp
+    src/mechanics/export/GltfExporter.cpp
+    src/mechanics/export/TexturePacking.cpp
     src/prefabs/templates.cpp
     src/scenes/3dModeler.cpp
     src/scenes/createScene.cpp

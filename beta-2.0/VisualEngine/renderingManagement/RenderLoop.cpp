@@ -1,6 +1,6 @@
 #include "render.h"
-#include "ChunkMesh.h"
-#include "GradientBackground.h"
+#include "meshing/ChunkMesh.h"
+#include "effects/GradientBackground.h"
 #include "../EngineGlobals.h"
 #include "../sceneManagement/SceneManager.h"
 #include "../inputManagement/Camera.h"
