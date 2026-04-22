@@ -15,6 +15,8 @@ struct UIElement {
     glm::vec4 labelColor = glm::vec4(1.0f);
     std::function<void()> onClick;
     bool visible = true;
+    // When true, element grows + lightens on hover, and click bounds match the inflated rect.
+    bool hoverable = false;
 
     // Text input fields
     bool isTextInput = false;

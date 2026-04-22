@@ -10,6 +10,7 @@ UIElement createButton(const std::string& id, float x, float y, float w, float h
     e.color = color;
     e.label = label;
     e.onClick = std::move(onClick);
+    e.hoverable = true;
     return e;
 }
 
@@ -71,5 +72,6 @@ UIElement createSubButton(const std::string& id,
     e.label = label;
     e.labelScale = 0.2f;
     e.onClick = std::move(onClick);
+    e.hoverable = true;
     return e;
 }

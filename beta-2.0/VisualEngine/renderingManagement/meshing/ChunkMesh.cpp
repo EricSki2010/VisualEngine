@@ -62,10 +62,14 @@ void registerMeshFromFile(const char* name, const char* meshFilePath) {
         return;
     }
 
-    // Check for "VN" magic (normals included)
+    // Magic values:
+    //   "VN" — has per-vertex normals (8 floats/vert)
+    //   "VC" — VN + appended culling data (triFaceDir[triCount] + faceState[6])
+    //   (none) — legacy format, 5 floats/vert, no normals
     char magic[2] = {0, 0};
     file.read(magic, 2);
-    bool hasNormals = (magic[0] == 'V' && magic[1] == 'N');
+    bool hasNormals    = (magic[0] == 'V' && (magic[1] == 'N' || magic[1] == 'C'));
+    bool hasCullingData = (magic[0] == 'V' && magic[1] == 'C');
     if (!hasNormals)
         file.seekg(0); // rewind if no magic
 
@@ -101,25 +105,16 @@ void registerMeshFromFile(const char* name, const char* meshFilePath) {
     if (reg.rectangular)
         for (int i = 0; i < 6; i++) reg.faceState[i] = 2;
 
-    // Log first few triangles' stored normals for debugging vectorMesh normals.
-    if (hasNormals) {
-        std::cout << "[load] " << name << " (" << meshFilePath << ") verts="
-                  << vertexCount << " indices=" << indexCount << std::endl;
-        int triLimit = std::min(indexCount / 3, 6u);
-        for (int t = 0; t < triLimit; t++) {
-            uint32_t i0 = reg.indices[t * 3 + 0];
-            uint32_t i1 = reg.indices[t * 3 + 1];
-            uint32_t i2 = reg.indices[t * 3 + 2];
-            glm::vec3 v0(reg.vertices[i0 * 8 + 0], reg.vertices[i0 * 8 + 1], reg.vertices[i0 * 8 + 2]);
-            glm::vec3 v1(reg.vertices[i1 * 8 + 0], reg.vertices[i1 * 8 + 1], reg.vertices[i1 * 8 + 2]);
-            glm::vec3 v2(reg.vertices[i2 * 8 + 0], reg.vertices[i2 * 8 + 1], reg.vertices[i2 * 8 + 2]);
-            glm::vec3 n(reg.vertices[i0 * 8 + 5], reg.vertices[i0 * 8 + 6], reg.vertices[i0 * 8 + 7]);
-            glm::vec3 rhCross = glm::normalize(glm::cross(v1 - v0, v2 - v0));
-            std::cout << "[load]  tri " << t
-                      << " storedN=(" << n.x << "," << n.y << "," << n.z << ")"
-                      << " rhCrossN=(" << rhCross.x << "," << rhCross.y << "," << rhCross.z << ")"
-                      << std::endl;
-        }
+    // VC format: per-triangle face direction + 6 face states for culling.
+    if (hasCullingData) {
+        int triCount = (int)(indexCount / 3);
+        std::vector<int32_t> faceDirData(triCount);
+        file.read(reinterpret_cast<char*>(faceDirData.data()), triCount * sizeof(int32_t));
+        reg.triFaceDir.assign(faceDirData.begin(), faceDirData.end());
+
+        int32_t fs[6] = {0, 0, 0, 0, 0, 0};
+        file.read(reinterpret_cast<char*>(fs), 6 * sizeof(int32_t));
+        for (int i = 0; i < 6; i++) reg.faceState[i] = fs[i];
     }
 
     gMeshes[name] = std::move(reg);
@@ -344,14 +339,6 @@ std::vector<MergedMeshEntry> buildSingleMeshes() {
                     instVerts[v * fpv + 5] = rn.x;
                     instVerts[v * fpv + 6] = rn.y;
                     instVerts[v * fpv + 7] = rn.z;
-                    if (v < 3 && name.find("slot_") != std::string::npos) {
-                        std::cout << "[emit] " << name << " vert " << v
-                                  << " localN=(" << n.x << "," << n.y << "," << n.z << ")"
-                                  << " rot=(" << inst->rotation.x << "," << inst->rotation.y << "," << inst->rotation.z << ")"
-                                  << " worldN=(" << rn.x << "," << rn.y << "," << rn.z << ")"
-                                  << " worldPos=(" << world.x << "," << world.y << "," << world.z << ")"
-                                  << std::endl;
-                    }
                 }
             }
 

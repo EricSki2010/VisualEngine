@@ -9,7 +9,6 @@
 #include "../../../../VisualEngine/inputManagement/Camera.h"
 #include <algorithm>
 #include <cmath>
-#include <iostream>
 
 // Current mesh for placing/replacing blocks
 static std::string sCurrentMesh = "cube";
@@ -482,30 +481,6 @@ void renderHoverHighlight() {
 
     if (!hit.hit || hit.triangleIndex < 0 || !hit.collider)
         return;
-
-    // Debug: print hovered face info (once per hover)
-    {
-        static glm::ivec3 lastHoverPos(-999);
-        static int lastHoverTri = -999;
-        glm::ivec3 bp = glm::ivec3(glm::round(hit.collider->position));
-        if (bp != lastHoverPos || hit.triangleIndex != lastHoverTri) {
-            lastHoverPos = bp;
-            lastHoverTri = hit.triangleIndex;
-            static const char* faceN[6] = {"+X","-X","+Y","-Y","+Z","-Z"};
-            const RegisteredMesh* hreg = getRegisteredMesh(hit.collider->meshName.c_str());
-            if (hit.collider->isRectangular || isForceRectangularRaycast()) {
-                int state = hreg ? hreg->faceState[hit.triangleIndex] : -1;
-                std::cout << "[Hover] " << hit.collider->meshName << " at(" << bp.x << "," << bp.y << "," << bp.z
-                          << ") face=" << faceN[hit.triangleIndex] << " state=" << state << std::endl;
-            } else {
-                int fd = (hreg && hit.triangleIndex < (int)hreg->triFaceDir.size()) ? hreg->triFaceDir[hit.triangleIndex] : -1;
-                int state = (fd >= 0 && fd < 6 && hreg) ? hreg->faceState[fd] : 0;
-                std::cout << "[Hover] " << hit.collider->meshName << " at(" << bp.x << "," << bp.y << "," << bp.z
-                          << ") tri=" << hit.triangleIndex << " faceDir=" << (fd >= 0 && fd < 6 ? faceN[fd] : "none")
-                          << " state=" << state << std::endl;
-            }
-        }
-    }
 
     glm::vec3 yellow(1.0f, 1.0f, 0.0f);
     if ((hit.collider->isRectangular || isForceRectangularRaycast())) {

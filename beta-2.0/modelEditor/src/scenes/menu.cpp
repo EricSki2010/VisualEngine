@@ -44,7 +44,8 @@ static void showMainMenu() {
     y -= GAP;
 
     addToGroup("menu_buttons", createButton("exit",
-        BTN_X, y, BTN_W, BTN_H, BTN_COLOR,
+        BTN_X, y, BTN_W, BTN_H,
+        {0.3f, 0.1f, 0.1f, 0.9f},
         "Exit",
         []() { glfwSetWindowShouldClose(ctx.window, true); }
     ));

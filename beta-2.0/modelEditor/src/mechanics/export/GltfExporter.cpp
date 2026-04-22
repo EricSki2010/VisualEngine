@@ -9,8 +9,12 @@
 #include <cstdint>
 #include <cstring>
 #include <cmath>
+#include <climits>
 #include <limits>
 #include <iostream>
+#include <unordered_map>
+#include <unordered_set>
+#include <functional>
 
 using json = nlohmann::json;
 
@@ -44,15 +48,6 @@ static void addTriangle(VertexColorPrim& p,
                         const glm::vec3& v0, const glm::vec3& v1, const glm::vec3& v2,
                         const glm::vec3& normal,
                         const glm::vec3& color) {
-    int triIdx = (int)(p.indices.size() / 3);
-    if (triIdx < 12) {
-        std::cout << "[gltf] tri " << triIdx
-                  << " v0=(" << v0.x << "," << v0.y << "," << v0.z << ")"
-                  << " v1=(" << v1.x << "," << v1.y << "," << v1.z << ")"
-                  << " v2=(" << v2.x << "," << v2.y << "," << v2.z << ")"
-                  << " -> emitted normal=(" << normal.x << "," << normal.y << "," << normal.z << ")"
-                  << std::endl;
-    }
     uint32_t base = (uint32_t)(p.positions.size() / 3);
     auto push = [&](const glm::vec3& v) {
         p.positions.push_back(v.x);
@@ -75,6 +70,184 @@ static void padBuffer(std::vector<uint8_t>& buf) {
     while (buf.size() % 4 != 0) buf.push_back(0);
 }
 
+// ── Greedy meshing ─────────────────────────────────────────────────────
+//
+// For axis-aligned cubes on integer positions, collect each visible face
+// into a "plane grid" keyed by (face direction, plane coordinate). Then
+// run 2D greedy meshing per plane: walk cells in (v, u) order, find the
+// largest rectangle of same-color cells starting at each unprocessed cell,
+// and emit it as one merged quad (2 triangles) instead of two per cell.
+
+// (normalAxis, uAxis, vAxis) for each face direction in cardinal order:
+// 0=+X, 1=-X, 2=+Y, 3=-Y, 4=+Z, 5=-Z.
+struct FaceAxes { int normalAxis, uAxis, vAxis; };
+static const FaceAxes kFaceAxes[6] = {
+    {0, 1, 2}, {0, 1, 2},
+    {1, 0, 2}, {1, 0, 2},
+    {2, 0, 1}, {2, 0, 1},
+};
+static const glm::vec3 kCardinalDirsLocal[6] = {
+    { 1, 0, 0}, {-1, 0, 0},
+    { 0, 1, 0}, { 0,-1, 0},
+    { 0, 0, 1}, { 0, 0,-1},
+};
+static bool isPositiveFace(int faceDir) {
+    return faceDir == 0 || faceDir == 2 || faceDir == 4;
+}
+
+struct GMPlaneKey {
+    int faceDir;
+    int planeIntCoord; // 2 * world_coord_along_normal + (positive ? 1 : -1)
+    bool operator==(const GMPlaneKey& o) const {
+        return faceDir == o.faceDir && planeIntCoord == o.planeIntCoord;
+    }
+};
+struct GMPlaneKeyHash {
+    size_t operator()(const GMPlaneKey& k) const {
+        return std::hash<int>()(k.faceDir)
+             ^ (std::hash<int>()(k.planeIntCoord) << 8);
+    }
+};
+
+struct GMCell {
+    int u, v;
+    int paletteIndex; // -1 = unpainted
+};
+
+static int planeIntCoordFor(int faceDir, const glm::ivec3& pos) {
+    int posAlong = pos[kFaceAxes[faceDir].normalAxis];
+    return 2 * posAlong + (isPositiveFace(faceDir) ? 1 : -1);
+}
+
+// Pack two ints into a 64-bit hash key (handles negatives via two's complement).
+static int64_t cellKey(int u, int v) {
+    return ((int64_t)(uint32_t)u << 32) | (uint32_t)v;
+}
+
+// Emit one merged quad as 4 verts + 6 indices (2 triangles sharing the
+// diagonal verts within the quad).
+static void emitGreedyQuad(VertexColorPrim& prim, int faceDir, int planeIntCoord,
+                           int uMin, int uMax, int vMin, int vMax,
+                           const glm::vec3& color) {
+    const FaceAxes& axes = kFaceAxes[faceDir];
+    float planeReal = planeIntCoord * 0.5f;
+    float u0 = uMin - 0.5f, u1 = uMax + 0.5f;
+    float v0 = vMin - 0.5f, v1 = vMax + 0.5f;
+
+    auto makeCorner = [&](float uu, float vv) {
+        glm::vec3 p(0.0f);
+        p[axes.normalAxis] = planeReal;
+        p[axes.uAxis]      = uu;
+        p[axes.vAxis]      = vv;
+        return p;
+    };
+    glm::vec3 c00 = makeCorner(u0, v0);
+    glm::vec3 c10 = makeCorner(u1, v0);
+    glm::vec3 c11 = makeCorner(u1, v1);
+    glm::vec3 c01 = makeCorner(u0, v1);
+
+    const glm::vec3& normal = kCardinalDirsLocal[faceDir];
+    glm::vec3 testCross = glm::cross(c10 - c00, c11 - c00);
+    bool ccwGivesOutward = glm::dot(testCross, normal) > 0.0f;
+
+    uint32_t base = (uint32_t)(prim.positions.size() / 3);
+    auto pushVert = [&](const glm::vec3& v) {
+        prim.positions.push_back(v.x);
+        prim.positions.push_back(v.y);
+        prim.positions.push_back(v.z);
+        prim.normals.push_back(normal.x);
+        prim.normals.push_back(normal.y);
+        prim.normals.push_back(normal.z);
+        prim.colors.push_back(color.r);
+        prim.colors.push_back(color.g);
+        prim.colors.push_back(color.b);
+    };
+
+    if (ccwGivesOutward) {
+        pushVert(c00); pushVert(c10); pushVert(c11); pushVert(c01);
+        prim.indices.push_back(base);
+        prim.indices.push_back(base + 1);
+        prim.indices.push_back(base + 2);
+        prim.indices.push_back(base);
+        prim.indices.push_back(base + 2);
+        prim.indices.push_back(base + 3);
+    } else {
+        pushVert(c00); pushVert(c11); pushVert(c10); pushVert(c01);
+        prim.indices.push_back(base);
+        prim.indices.push_back(base + 1);
+        prim.indices.push_back(base + 2);
+        prim.indices.push_back(base);
+        prim.indices.push_back(base + 3);
+        prim.indices.push_back(base + 1);
+    }
+}
+
+// Run greedy meshing on one plane. Returns the number of merged quads emitted.
+static int greedyMeshPlane(VertexColorPrim& prim, int faceDir, int planeIntCoord,
+                           const std::vector<GMCell>& cells,
+                           const std::function<glm::vec3(int)>& colorForIndex) {
+    if (cells.empty()) return 0;
+
+    std::unordered_map<int64_t, int> grid;
+    int uMin = INT_MAX, uMax = INT_MIN, vMin = INT_MAX, vMax = INT_MIN;
+    for (const auto& c : cells) {
+        grid[cellKey(c.u, c.v)] = c.paletteIndex;
+        if (c.u < uMin) uMin = c.u;
+        if (c.u > uMax) uMax = c.u;
+        if (c.v < vMin) vMin = c.v;
+        if (c.v > vMax) vMax = c.v;
+    }
+
+    std::unordered_set<int64_t> processed;
+    int quadsEmitted = 0;
+
+    for (int v = vMin; v <= vMax; v++) {
+        for (int u = uMin; u <= uMax; u++) {
+            int64_t k = cellKey(u, v);
+            if (processed.count(k)) continue;
+            auto it = grid.find(k);
+            if (it == grid.end()) continue;
+            int paletteIndex = it->second;
+
+            // Extend width: consecutive cells at v, same color, not processed.
+            int wMax = 0;
+            for (int w = 0; u + w <= uMax; w++) {
+                int64_t kw = cellKey(u + w, v);
+                if (processed.count(kw)) break;
+                auto it2 = grid.find(kw);
+                if (it2 == grid.end() || it2->second != paletteIndex) break;
+                wMax = w + 1;
+            }
+
+            // Extend height: rows where the full w-wide strip matches.
+            int hMax = 1;
+            for (int h = 1; v + h <= vMax; h++) {
+                bool rowOk = true;
+                for (int w = 0; w < wMax; w++) {
+                    int64_t khw = cellKey(u + w, v + h);
+                    if (processed.count(khw)) { rowOk = false; break; }
+                    auto it2 = grid.find(khw);
+                    if (it2 == grid.end() || it2->second != paletteIndex) {
+                        rowOk = false; break;
+                    }
+                }
+                if (!rowOk) break;
+                hMax = h + 1;
+            }
+
+            for (int h = 0; h < hMax; h++)
+                for (int w = 0; w < wMax; w++)
+                    processed.insert(cellKey(u + w, v + h));
+
+            emitGreedyQuad(prim, faceDir, planeIntCoord,
+                           u, u + wMax - 1, v, v + hMax - 1,
+                           colorForIndex(paletteIndex));
+            quadsEmitted++;
+        }
+    }
+    return quadsEmitted;
+}
+
 bool exportModelToGlb(const std::string& outPath) {
     const auto& colliders = getAllColliders();
     const glm::vec3* palette = getPaintPalette();
@@ -91,7 +264,65 @@ bool exportModelToGlb(const std::string& outPath) {
 
     int culledTris = 0;
     int emittedTris = 0;
+    int greedyQuads = 0;
 
+    // A collider is greedy-meshable if: rectangular, 90-aligned rotation,
+    // and on integer grid coordinates. Everything else (wedges, custom
+    // vectorMesh shapes, rotated cubes, off-grid placements) goes through
+    // the per-triangle path below.
+    auto isGreedyMeshable = [&](const BlockCollider& col,
+                                const RegisteredMesh* reg,
+                                const glm::ivec3& ipos,
+                                int rotMap[6]) -> bool {
+        if (!reg->rectangular) return false;
+        if (!buildFaceRotMap(col.rotation, rotMap)) return false;
+        if (std::fabs(col.position.x - ipos.x) > 0.01f ||
+            std::fabs(col.position.y - ipos.y) > 0.01f ||
+            std::fabs(col.position.z - ipos.z) > 0.01f) return false;
+        return true;
+    };
+
+    // ── PHASE 1: Collect face cells from greedy-meshable colliders ──
+    std::unordered_map<GMPlaneKey, std::vector<GMCell>, GMPlaneKeyHash> planeGrids;
+
+    for (const auto& col : colliders) {
+        if (col.meshName == "_ghost") continue;
+        const RegisteredMesh* reg = getRegisteredMesh(col.meshName.c_str());
+        if (!reg) continue;
+
+        glm::ivec3 ipos((int)roundf(col.position.x),
+                        (int)roundf(col.position.y),
+                        (int)roundf(col.position.z));
+        int rotMap[6];
+        if (!isGreedyMeshable(col, reg, ipos, rotMap)) continue;
+
+        for (int f = 0; f < 6; f++) {
+            int worldFd = rotMap[f];
+            if (cullSet.count({ipos, worldFd})) {
+                culledTris += 2; // would have been 2 tris per face
+                continue;
+            }
+            int paletteIndex = -1;
+            if (f < (int)col.triColors.size())
+                paletteIndex = col.triColors[f];
+
+            GMPlaneKey key{worldFd, planeIntCoordFor(worldFd, ipos)};
+            int u = ipos[kFaceAxes[worldFd].uAxis];
+            int v = ipos[kFaceAxes[worldFd].vAxis];
+            planeGrids[key].push_back({u, v, paletteIndex});
+        }
+    }
+
+    // ── PHASE 2: Greedy mesh each plane and emit merged quads ──
+    for (auto& kv : planeGrids) {
+        int q = greedyMeshPlane(prim, kv.first.faceDir, kv.first.planeIntCoord,
+                                kv.second, colorForIndex);
+        greedyQuads += q;
+        emittedTris += q * 2;
+    }
+
+    // ── PHASE 3: Per-triangle emit for non-greedy-meshable colliders ──
+    // (wedges, custom vectorMesh shapes, rotated/off-grid cubes)
     for (const auto& col : colliders) {
         if (col.meshName == "_ghost") continue;
         const RegisteredMesh* reg = getRegisteredMesh(col.meshName.c_str());
@@ -103,6 +334,8 @@ bool exportModelToGlb(const std::string& outPath) {
         glm::ivec3 ipos((int)roundf(pos.x), (int)roundf(pos.y), (int)roundf(pos.z));
 
         int rotMap[6];
+        if (isGreedyMeshable(col, reg, ipos, rotMap)) continue; // handled above
+
         bool is90 = buildFaceRotMap(rot, rotMap);
 
         int triCount = reg->indexCount / 3;
@@ -111,11 +344,9 @@ bool exportModelToGlb(const std::string& outPath) {
             uint32_t i1 = reg->indices[t * 3 + 1];
             uint32_t i2 = reg->indices[t * 3 + 2];
 
-            // Per-triangle face direction (cardinal 0..5, or -1 for "no face").
             int fd = (t < (int)reg->triFaceDir.size()) ? reg->triFaceDir[t] : -1;
             int worldFd = (is90 && fd >= 0 && fd < 6) ? rotMap[fd] : fd;
 
-            // Skip faces hidden by neighbor blocks.
             if (worldFd >= 0 && worldFd < 6) {
                 if (cullSet.count({ipos, worldFd})) {
                     culledTris++;
@@ -123,10 +354,6 @@ bool exportModelToGlb(const std::string& outPath) {
                 }
             }
 
-            // Look up triangle color. For rectangular meshes triColors is
-            // indexed by cardinal face direction (which equals the raycast
-            // face index). For non-rectangular meshes it's indexed by
-            // triangle.
             int paletteIndex = -1;
             if (reg->rectangular) {
                 if (fd >= 0 && fd < (int)col.triColors.size())
@@ -137,7 +364,6 @@ bool exportModelToGlb(const std::string& outPath) {
             }
             glm::vec3 color = colorForIndex(paletteIndex);
 
-            // Transform vertices into world space.
             glm::vec3 v0(reg->vertices[i0 * fpv],
                          reg->vertices[i0 * fpv + 1],
                          reg->vertices[i0 * fpv + 2]);
@@ -151,11 +377,6 @@ bool exportModelToGlb(const std::string& outPath) {
             v1 = rotatePoint(v1, rot) + pos;
             v2 = rotatePoint(v2, rot) + pos;
 
-            // Pick a normal. VN meshes (fpv == 8) carry per-vertex normals
-            // in the source mesh — those already account for the vectorMesh
-            // save-time flip, so we rotate and use them. Non-VN meshes
-            // (prefabs, fpv == 5) have no stored normals; compute from
-            // winding. Both paths respect the collider's rotation.
             glm::vec3 normal;
             if (fpv == 8) {
                 glm::vec3 localN(reg->vertices[i0 * fpv + 5],
@@ -335,6 +556,7 @@ bool exportModelToGlb(const std::string& outPath) {
     out.write(reinterpret_cast<const char*>(binBuffer.data()), binChunkLen);
 
     std::cout << "[gltf] Exported " << emittedTris << " tris ("
+              << greedyQuads << " merged quads, "
               << culledTris << " culled), "
               << vertCount << " verts -> " << outPath << std::endl;
     return true;

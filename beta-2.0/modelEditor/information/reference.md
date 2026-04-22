@@ -9,7 +9,7 @@ Main editor scene with two modes: Build and Paint.
 
 #### Sidebar UI
 - Right panel: x=0.6, width=0.4, full height
-- **Block selector grid** (5×3, 15 slots): Bottom of panel, build mode only. Slots 0-1 are cube/wedge. Slots 2-14 load from `assets/saves/vectorMeshes/slot_N.mesh`.
+- **Block selector grid** (5×3, 15 slots): Bottom of panel, build mode only. Slots 0-1 are cube/wedge. Slots 2-14 load from `assets/saves/vectorMeshes/slot_N.mesh`. Click any slot to select it (empty slots select without changing the current mesh). Hovering an unselected slot swaps its base icon from the `+` texture to the `~` hover texture; the selected slot always shows the `-` (yellow-outline) texture.
 - **Edit Object / Edit Color button**: Switches label based on editor mode.
 - **Editor Mode dropdown**: Build / Paint toggle.
 - **Color Mode dropdown** (paint mode, inside color edit panel): RGB / Hex.
@@ -38,8 +38,10 @@ Main editor scene with two modes: Build and Paint.
 #### Color Wheel
 - 16 triangular slices in bottom-right corner (quarter circle, center at screen corner)
 - Radius: 0.6 NDC
-- Selected slice: Yellow outline, drawn on top
 - Only visible in paint mode
+- Selected slice: yellow outline at line width 3, drawn on top
+- Hovered slice: grey (0.7) outline at line width 3; suppressed when hovered == selected
+- Click a slice to select it (aspect-corrected hit test, skipped if cursor is over an interactive UI element as reported by `isPointOverUI`)
 
 #### Color Editing
 - Click "Edit Color" → hides editor mode dropdown, shows color edit panel
@@ -91,7 +93,11 @@ Editor for creating custom meshes from dots, lines, and triangles.
 
 #### File Formats
 - **.vmesh**: Binary. Dots (vec3 array), lines (index pairs), triangles (index triples + flipped flag).
-- **.mesh export**: Converts triangles to pos3+uv2+normal3 vertices. "VN" magic header. Normals flipped for correct lighting. Each triangle gets 3 unique vertices.
+- **.mesh export**: Converts triangles to pos3+uv2+normal3 vertices. "VC" magic header (VN + culling data). Normals flipped (`-cross`) on save so the default outward direction matches the user's CW click convention. Each triangle gets 3 unique vertices. Per-triangle `faceDir` and per-side `faceState[6]` computed at export time:
+  - A triangle with all 3 verts on a cardinal side plane (±0.5) and inside the 1×1 face bounds is tagged with that side (0..5).
+  - Each side's state is derived from summed projected areas of its flat triangles: `≥0.99` → state 2 (solid), `>0` → state 1 (partial), else 0 (open).
+  - Non-flat triangles are tagged with the nearest still-open side, or -1 if no open side exists. These are never culled at runtime.
+  - This data feeds directly into `RegisteredMesh.triFaceDir` / `faceState` so custom shapes participate in face-pair culling like prefab cubes.
 
 #### Pause Menu
 - "Continue", "Save Model" (saves .vmesh + exports .mesh), "Exit" (returns to 3dModeler or menu).
@@ -112,7 +118,7 @@ New model wizard. Type dropdown (3D Model), name input, template selection (None
 
 ## Mechanics
 
-### Highlight (`src/mechanics/Highlight.cpp`)
+### Highlight (`src/mechanics/interaction/Highlight.cpp`)
 Handles all selection rendering and input for both Build and Paint modes.
 
 #### Selection Rendering
@@ -130,18 +136,46 @@ Rotation is handled by `rotMap`: each local face direction is rotated to world s
 #### Paint Plane Selection
 Stores starting triangle's normal and plane distance (`dot(normal, center)`). Only selects triangles with matching normal (dot product > 0.95) and plane distance (within 0.1f).
 
-### Selection (`src/mechanics/Selection.cpp`)
+### Selection (`src/mechanics/interaction/Selection.cpp`)
 Simple vector storage of `SelectedFace { blockPos (ivec3), faceIndex (int) }`. Deduplicates on add.
 
-### GltfExporter (`src/mechanics/GltfExporter.cpp`)
+### GltfExporter (`src/mechanics/export/GltfExporter.cpp`)
 `exportModelToGlb(outPath)` — exports the current scene as a glTF Binary file.
 
-- Iterates all colliders, transforms vertices into world space (rotation + position baked).
-- Groups triangles into 17 buckets: 16 palette colors + 1 unpainted (uses neutral grey 0.8).
-- Each bucket becomes a separate glTF primitive with its own material.
-- Materials use `KHR_materials_unlit` so your engine applies its own lighting.
-- Writes a single `.glb` file (12-byte header + JSON chunk + BIN chunk).
-- Uses nlohmann/json (bundled in `beta-2.0/thirdparty/json.hpp`).
+**One primitive, one material, per-vertex colors.** Single unlit double-sided
+material; colors travel on the `COLOR_0` vertex attribute. No per-color
+buckets, no per-model textures.
+
+**Three-phase pipeline:**
+
+1. **Face-pair cull** — calls `computeFaceCullSet()` (shared with the editor's
+   live renderer) to compute `(pos, worldFace)` pairs hidden by adjacent
+   block faces. Applies to any mesh whose `reg.faceState[f] > 0`, which now
+   includes vectorMesh shapes saved in VC format.
+2. **Greedy mesh (rectangular axis-aligned cubes only)** — collects each
+   cube's visible face cells into per-plane grids keyed by
+   `(worldFace, planeIntCoord)`. Runs 2D greedy meshing per plane: walks
+   cells in (v, u) order, extends the largest same-color rectangle starting
+   at each unprocessed cell (width first, then height), emits each rectangle
+   as one merged quad (4 verts + 6 indices with intra-quad vertex sharing).
+   Winding is auto-corrected by comparing the RH cross to the desired face
+   normal. Cubes that aren't 90°-aligned or on integer grid fall through to
+   the next phase.
+3. **Per-triangle emit** — wedges, vectorMesh custom shapes, rotated/off-grid
+   cubes. Transforms verts into world space, looks up per-triangle face
+   direction via `reg.triFaceDir`, skips culled triangles, emits each
+   triangle individually. VN meshes (fpv == 8) use their stored per-vertex
+   normals (rotated by the collider's rotation). Prefabs (fpv == 5) compute
+   normals from the winding via `cross(v1-v0, v2-v0)`.
+
+**Color lookup:** rectangular meshes index `col.triColors[fd]` (cardinal face
+direction); non-rectangular meshes index `col.triColors[t]` (triangle index).
+Unpainted (palette index < 0) falls back to `kUnpaintedColor = grey(0.8)`.
+
+**Output:** single `.glb` file (12-byte header + JSON chunk + BIN chunk). Four
+accessors per primitive: POSITION, NORMAL, COLOR_0, indices. Uses
+nlohmann/json (bundled in `beta-2.0/thirdparty/json.hpp`). Logs
+`[gltf] Exported N tris (M merged quads, K culled), V verts -> path`.
 
 ---
 
@@ -161,7 +195,7 @@ Slope and triangular side faces have faceDir=none (0xFFFFFFFF) — invisible to 
 Left/right partial faces (state 1) are culled when adjacent to a state 2 face.
 
 ### EmbeddedSelectors.h
-Embedded 32×32 PNG data for "+" (empty slot) and "-" (selected slot) icons.
+Embedded 32×32 PNG data for three block-selector icons: `+` (unselected, unhovered), `-` (selected, yellow outline), and `~` (hovered, unselected).
 
 ### templates.cpp
 `createCubeTemplate(size)`: Fills size³ volume with cube blocks.

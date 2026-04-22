@@ -20,6 +20,8 @@ void clearUI();
 void renderUI();
 void processUIInput();
 bool handleUIClick(double mouseX, double mouseY, int screenWidth, int screenHeight);
+// Returns true if the screen point is over any visible UI element.
+bool isPointOverUI(double mouseX, double mouseY, int screenWidth, int screenHeight);
 std::string getInputText(const std::string& groupId, const std::string& elementId);
 bool hasPendingConfirm();
 std::string getPendingConfirmId();

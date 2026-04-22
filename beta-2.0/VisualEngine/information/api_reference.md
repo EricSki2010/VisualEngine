@@ -8,7 +8,7 @@ VisualEngine/
 ├── EngineGlobals.h                — Global context struct
 ├── renderingManagement/
 │   ├── render.h                   — Shader, Scene, Texture, Mesh classes
-│   ├── DefaultShaders.h           — Lit/textured shader source
+│   ├── DefaultShaders.h           — Default textured/solid shader + vertex-colored shader
 │   ├── Shader.cpp, Scene.cpp, Texture.cpp, Mesh.cpp
 │   ├── RenderLoop.cpp/h           — Frame loop: input → update → render
 │   ├── meshing/
@@ -85,13 +85,18 @@ VisualEngine/
 
 `EngineContext ctx` — Single global struct holding all engine state:
 - `ctx.window` — GLFWwindow pointer
-- `ctx.shader` — default Shader
+- `ctx.shader` — default Shader (textured / solid-color path)
+- `ctx.vcShader` — vertex-colored Shader (pos+normal+color path, no texture/uniform color)
 - `ctx.scene` — Scene (projection, view, lighting)
 - `ctx.width`, `ctx.height` — current framebuffer dimensions
 - `ctx.needsRebuild` — flag set by draw/undraw/setMode, consumed by update
 - `ctx.mode` — SINGLE or CHUNK
 - `ctx.mergedMeshes` — built mesh data ready for rendering
 - `ctx.scrollDelta` — mouse scroll delta for the current frame (reset each frame)
+
+Both shaders share the same static uniforms (light/view/brightness) uploaded
+once at `run()` start. Vertex-colored meshes must be drawn with `ctx.vcShader`
+bound, textured/solid meshes with `ctx.shader`.
 
 
 ## RENDERING
@@ -121,9 +126,20 @@ VisualEngine/
 `Mesh(verticesWithNormals, vertexCount, indices, indexCount, hasNormals)`
   Creates VAO/VBO/EBO from vertex data with pre-computed normals (position3 + uv2 + normal3 = 8 floats). Skips normal computation.
 
+`Mesh::createVertexColored(verts, vertexCount, indices, indexCount) -> Mesh*`
+  Static factory. Input is interleaved pos3 + normal3 + color3 (9 floats per
+  vertex). The returned mesh has `vertexColored = true` and must be drawn
+  with `ctx.vcShader`. Used by any pipeline that ships color as a per-vertex
+  stream (e.g. loading vertex-colored GLBs or future chunk meshes with
+  COLOR_0). Caller owns the returned pointer.
+
   `mesh.setTexture(tex)` — assigns a texture.
   `mesh.setColor(color)` — sets a solid color.
-  `mesh.draw(shader)` — binds texture/color uniforms and draws.
+  `mesh.vertexColored` — true for meshes built via `createVertexColored`;
+    `draw()` skips the texture/objectColor uniforms entirely when set.
+  `mesh.draw(shader)` — uploads alpha + (if not vertex-colored) texture/
+    color uniforms, binds VAO, draws. Caller is responsible for having the
+    matching shader bound.
 
 
 ## OVERLAY
@@ -166,10 +182,28 @@ VisualEngine/
   Clears all draw instances.
 
 `buildSingleMeshes() -> vector<MergedMeshEntry>`
-  Face-pair culling mesh builder. Three phases:
-  1. **Collect**: Gathers all faces with state 1/2 into a flat list with world-space directions (rotation applied via rotMap).
-  2. **Match**: Hashes faces by (position, direction), finds pairs at shared boundaries. Rules: 2v2 → cull both, 1v2 → cull the 1, 1v1 → nothing.
-  3. **Emit**: Per triangle, check cull set with O(1) lookup. Painted triangles go to per-color buckets.
+  Face-pair culling mesh builder. Calls `computeFaceCullSet()` for phases 1+2,
+  then:
+  - **Emit**: Walks `gDrawList`, transforms verts by instance rotation +
+    position. For each triangle looks up its face direction via
+    `reg.triFaceDir`, checks the cull set with O(1) lookup. Paint color for
+    rectangular meshes is indexed by cardinal face direction (`fd`), for
+    non-rectangular by triangle index (`t`). Painted triangles go to
+    per-color buckets; unpainted go to a default bucket.
+
+`computeFaceCullSet() -> FaceCullSet`
+  Shared helper used by both the live renderer and the GLB exporter. Walks
+  `gDrawList`, builds face entries from each instance's `faceState` (rotated
+  to world space via `buildFaceRotMap`), and applies the 2v2 / 1v2 rules to
+  produce the set of `(worldPos, worldFaceDir)` pairs that should be hidden.
+
+`buildFaceRotMap(rotation, rotMap[6]) -> bool`
+  Fills `rotMap[localFace] = worldFace` for a 90°-aligned rotation. Returns
+  false if the rotation isn't a multiple of 90° on each axis.
+
+`FaceKey { pos, face }` / `FaceKeyHash` / `FaceCullSet`
+  Public types used by the cull-set API. A `FaceCullSet` is an
+  `unordered_set<FaceKey, FaceKeyHash>`.
 
 `buildMergedMeshes() -> vector<MergedMeshEntry>`
   Placeholder for future chunk-based meshing. Currently forwards to buildSingleMeshes.
@@ -387,14 +421,20 @@ rz -> 3
 **.mesh (VN):** `"VN"[vertexCount:u32][indexCount:u32][texPathLen:u32][vertices: vertexCount*8 floats (pos3+uv2+normal3)][indices][texPath]`
   Includes pre-computed normals. Detected by "VN" magic header.
 
+**.mesh (VC):** `"VC"[vertexCount:u32][indexCount:u32][texPathLen:u32][vertices: vertexCount*8 floats][indices][texPath][triFaceDir: triCount int32s][faceState: 6 int32s]`
+  VN layout + per-triangle face direction + 6 face cull states appended.
+  Produced by the vectorMesh editor on save; lets custom meshes participate
+  in face-pair culling the same way prefab cubes/wedges do. Detected by
+  "VC" magic header.
+
 **.vmesh:** Binary format for vector mesh editor data. Stores dots (vec3 array), lines (index pairs), triangles (index triples + flipped flag).
 
 
 ## UI SYSTEM
 **Header:** `VisualEngine/uiManagement/UIElement.h`
 
-`UIElement { id, position, size, color, textureId, label, labelScale, labelColor, onClick, visible, isTextInput, focused, inputText, placeholder, maxLength, onUnfocus, requireConfirm, confirmId }`
-  UI element struct. Supports buttons, panels, images, and text inputs. Optional confirmation system via requireConfirm/confirmId.
+`UIElement { id, position, size, color, textureId, label, labelScale, labelColor, onClick, visible, hoverable, isTextInput, focused, inputText, placeholder, maxLength, onUnfocus, requireConfirm, confirmId }`
+  UI element struct. Supports buttons, panels, images, and text inputs. Optional confirmation system via requireConfirm/confirmId. `hoverable` (default false) opts into the grow/lighten hover effect — when true, the element inflates by 5% and lightens by 0.1 RGB on hover, and click bounds match the inflated rect.
 
 **Header:** `VisualEngine/uiManagement/UIRenderer.h`
 **Implementation:** `VisualEngine/uiManagement/UIRenderer.cpp`
@@ -439,13 +479,16 @@ rz -> 3
   Removes all groups and elements.
 
 `renderUI()`
-  Draws all visible groups/elements. Renders labels centered on buttons. Renders text input content with blinking cursor. Highlights focused inputs and pending confirm buttons.
+  Draws all visible groups/elements. Renders labels centered on buttons. Renders text input content with blinking cursor. Highlights focused inputs and pending confirm buttons (+0.15 RGB). Hoverable elements under the cursor are drawn inflated by 5% with +0.1 RGB and 1.05× label scale; this stacks with the focus/pending tint if both apply.
 
 `processUIInput()`
-  Handles left-click detection and keyboard input for focused text fields. Supports letters, numbers, space, dash, underscore, backspace.
+  Updates hover state, handles left-click detection, and processes keyboard input for focused text fields. Supports letters, numbers, space, dash, underscore, backspace.
 
 `handleUIClick(mouseX, mouseY, screenWidth, screenHeight) -> bool`
-  Hit tests all visible elements back-to-front. Handles focus, confirmation system, and onClick. Returns true if something was hit.
+  Hit tests all visible elements back-to-front. Hoverable elements use the inflated (5%) bounds so clicks match the hover visual; non-hoverable elements use their raw bounds. Handles focus, confirmation system, and onClick. Returns true if something was hit.
+
+`isPointOverUI(mouseX, mouseY, screenWidth, screenHeight) -> bool`
+  Returns true if the screen point is over any visible interactive element. Decorative elements (no onClick, not a text input, no confirmId/requireConfirm) are skipped — so full-panel backgrounds don't block clicks on raw-GL UI like the color wheel.
 
 `getInputText(groupId, elementId) -> string`
   Returns the current text in a text input element.
@@ -463,19 +506,22 @@ rz -> 3
 **Implementation:** `VisualEngine/uiManagement/UIPrefabs.cpp`
 
 `createButton(id, x, y, w, h, color, label, onClick) -> UIElement`
-  Creates a button with centered text label.
+  Creates a button with centered text label. `hoverable = true`.
 
 `createPanel(id, x, y, w, h, color) -> UIElement`
-  Creates a solid colored rectangle.
+  Creates a solid colored rectangle. Not hoverable — treated as decorative by `isPointOverUI`.
 
 `createImage(id, x, y, w, h, textureId) -> UIElement`
-  Creates a textured rectangle.
+  Creates a textured rectangle. Not hoverable by default; set `hoverable = true` on the returned element to opt in. Assigning an `onClick` promotes it to interactive for `isPointOverUI` purposes.
 
 `createTextInput(id, x, y, w, h, color, placeholder, maxLength) -> UIElement`
-  Creates a clickable text input field with placeholder text.
+  Creates a clickable text input field with placeholder text. Text inputs are always excluded from hover (they keep their own focused-lighter state).
 
 `createSubButton(id, parentX, parentY, parentW, parentH, anchorX, anchorY, widthRatio, heightRatio, padding, color, label, onClick) -> UIElement`
-  Creates a button positioned relative to a parent element. anchorX/anchorY (0-1) control alignment. widthRatio/heightRatio are fractions of parent size. padding is fraction of parent height.
+  Creates a button positioned relative to a parent element. anchorX/anchorY (0-1) control alignment. widthRatio/heightRatio are fractions of parent size. padding is fraction of parent height. `hoverable = true`.
+
+`createDropdown(...)` (see UIManager.h)
+  Creates a toggle button whose onClick shows/hides a group of option buttons. Both the toggle and option buttons are `hoverable = true`.
 
 
 ## LINE RENDERER

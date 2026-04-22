@@ -94,14 +94,26 @@ static void pushVMeshUndo() {
         sVMeshUndoStack.erase(sVMeshUndoStack.begin());
 }
 
+// Cardinal face helpers. All vectorMesh shapes live in a 1x1x1 box centered
+// at origin, so side planes are at ±0.5 along each axis.
+// Cardinal order: 0=+X, 1=-X, 2=+Y, 3=-Y, 4=+Z, 5=-Z.
+static int vmFaceNormalAxis(int f) { return f / 2; }
+static bool vmFaceIsPositive(int f) { return (f & 1) == 0; }
+static float vmFacePlaneCoord(int f) { return vmFaceIsPositive(f) ? 0.5f : -0.5f; }
+
 static void exportVMeshToMesh() {
     if (sVMeshName.empty() || sPlacedTriangles.empty()) return;
     std::string meshPath = "assets/saves/vectorMeshes/" + sVMeshName + ".mesh";
     std::ofstream out(meshPath, std::ios::binary);
     if (!out) return;
 
+    // Build vertex/index data and keep the per-triangle world-space verts
+    // around so we can classify each triangle to a cardinal side afterward.
+    struct WrittenTri { glm::vec3 va, vb, vc; };
+    std::vector<WrittenTri> writtenTris;
     std::vector<float> verts;
     std::vector<unsigned int> indices;
+
     for (const auto& t : sPlacedTriangles) {
         if (t.dotA < (int)sPlacedDots.size() && t.dotB < (int)sPlacedDots.size() &&
             t.dotC < (int)sPlacedDots.size()) {
@@ -110,11 +122,8 @@ static void exportVMeshToMesh() {
             glm::vec3 vb = sPlacedDots[t.dotB];
             glm::vec3 vc = sPlacedDots[t.dotC];
 
-            // Blanket flip: user's natural click convention is CW from their
-            // viewing angle, so RH cross points inward. Negate on save so
-            // stored normal points outward by default. Per-triangle override
-            // via the Flip Normal button (swaps winding + negates normal
-            // again for the oddball triangles).
+            // Blanket flip on save (user's natural click is CW from their view).
+            // Per-triangle Flip Normal overrides via t.flipped.
             glm::vec3 normal = glm::cross(vb - va, vc - va);
             if (t.flipped) {
                 std::swap(vb, vc);
@@ -131,19 +140,101 @@ static void exportVMeshToMesh() {
 
             addVert(va, normal); addVert(vb, normal); addVert(vc, normal);
             indices.push_back(base); indices.push_back(base+1); indices.push_back(base+2);
+
+            writtenTris.push_back({va, vb, vc});
         }
     }
 
+    // ── Face cull state computation ────────────────────────────────────
+    //
+    // 1. Classify each triangle: if all 3 verts lie on a cardinal side plane
+    //    (±0.5 along one axis) and within the 1x1 face bounds, tag with that
+    //    side (0..5). Otherwise leave at -1 for now.
+    const float FACE_EPS = 0.01f;
+    int32_t triCount = (int32_t)writtenTris.size();
+    std::vector<int32_t> triFaceDir(triCount, -1);
+
+    for (int i = 0; i < triCount; i++) {
+        const auto& t = writtenTris[i];
+        for (int f = 0; f < 6; f++) {
+            int axis = vmFaceNormalAxis(f);
+            float plane = vmFacePlaneCoord(f);
+            bool allOnPlane =
+                std::fabs(t.va[axis] - plane) < FACE_EPS &&
+                std::fabs(t.vb[axis] - plane) < FACE_EPS &&
+                std::fabs(t.vc[axis] - plane) < FACE_EPS;
+            if (!allOnPlane) continue;
+
+            int a1 = (axis + 1) % 3;
+            int a2 = (axis + 2) % 3;
+            auto inSquare = [&](const glm::vec3& v) {
+                return v[a1] >= -0.5f - FACE_EPS && v[a1] <= 0.5f + FACE_EPS
+                    && v[a2] >= -0.5f - FACE_EPS && v[a2] <= 0.5f + FACE_EPS;
+            };
+            if (!inSquare(t.va) || !inSquare(t.vb) || !inSquare(t.vc)) continue;
+
+            triFaceDir[i] = f;
+            break;
+        }
+    }
+
+    // 2. Sum projected areas of flat triangles per side. Full 1.0 area means
+    //    the side is fully covered (state 2). Any area means partially
+    //    covered (state 1). None means open (state 0).
+    int32_t faceState[6] = {0, 0, 0, 0, 0, 0};
+    float faceArea[6] = {0.0f};
+    for (int i = 0; i < triCount; i++) {
+        int f = triFaceDir[i];
+        if (f < 0) continue;
+        const auto& t = writtenTris[i];
+        int axis = vmFaceNormalAxis(f);
+        int a1 = (axis + 1) % 3;
+        int a2 = (axis + 2) % 3;
+        float e1x = t.vb[a1] - t.va[a1];
+        float e1y = t.vb[a2] - t.va[a2];
+        float e2x = t.vc[a1] - t.va[a1];
+        float e2y = t.vc[a2] - t.va[a2];
+        faceArea[f] += 0.5f * std::fabs(e1x * e2y - e2x * e1y);
+    }
+    for (int f = 0; f < 6; f++) {
+        if (faceArea[f] >= 0.99f)    faceState[f] = 2;
+        else if (faceArea[f] > 0.0f) faceState[f] = 1;
+        else                         faceState[f] = 0;
+    }
+
+    // 3. Non-flat triangles (still -1): tag with nearest cardinal side whose
+    //    state is 0. Sides at state 1 or 2 are already "owned" by flat
+    //    triangles; interior / slanted geometry shouldn't be culled along
+    //    with them. If no open side exists, stays -1 (never culled).
+    for (int i = 0; i < triCount; i++) {
+        if (triFaceDir[i] >= 0) continue;
+        const auto& t = writtenTris[i];
+        glm::vec3 centroid = (t.va + t.vb + t.vc) / 3.0f;
+        int bestFace = -1;
+        float bestDist = std::numeric_limits<float>::max();
+        for (int f = 0; f < 6; f++) {
+            if (faceState[f] != 0) continue;
+            int axis = vmFaceNormalAxis(f);
+            float dist = std::fabs(centroid[axis] - vmFacePlaneCoord(f));
+            if (dist < bestDist) { bestDist = dist; bestFace = f; }
+        }
+        triFaceDir[i] = bestFace;
+    }
+
+    // ── Write the .mesh file (VC format = VN + appended culling data) ──
     uint32_t vertCount = (uint32_t)(verts.size() / 8);
     uint32_t idxCount = (uint32_t)indices.size();
     uint32_t texPathLen = 0;
-    char magic[2] = {'V', 'N'};
+    char magic[2] = {'V', 'C'};
     out.write(magic, 2);
     out.write(reinterpret_cast<const char*>(&vertCount), 4);
     out.write(reinterpret_cast<const char*>(&idxCount), 4);
     out.write(reinterpret_cast<const char*>(&texPathLen), 4);
     out.write(reinterpret_cast<const char*>(verts.data()), verts.size() * sizeof(float));
     out.write(reinterpret_cast<const char*>(indices.data()), indices.size() * sizeof(uint32_t));
+    // Culling data: triFaceDir[triCount] as int32, faceState[6] as int32.
+    out.write(reinterpret_cast<const char*>(triFaceDir.data()), triCount * sizeof(int32_t));
+    out.write(reinterpret_cast<const char*>(faceState), 6 * sizeof(int32_t));
 }
 
 static void saveVectorMesh() {

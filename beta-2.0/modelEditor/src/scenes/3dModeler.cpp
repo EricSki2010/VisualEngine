@@ -38,6 +38,7 @@ static bool sWasF5Down = false;
 static bool sWasLeftDown = false;
 static Texture* sBlockSelectorPlus = nullptr;
 static Texture* sBlockSelectorMinus = nullptr;
+static Texture* sBlockSelectorTilde = nullptr;
 static const int SELECTOR_SLOTS = 15;
 static std::string sSlotMesh[SELECTOR_SLOTS]; // empty = unassigned
 static int sSelectedSlot = -1;
@@ -53,6 +54,7 @@ static int sColorMode = 0; // 0 = RGB, 1 = Hex, 2 = Color Wheel
 static std::function<void()> sRebuildColorInputs;
 static std::function<void()> sRebuildActionButton;
 static int sSelectedColor = 0; // which color wheel slice is selected
+static int sHoveredColor = -1; // slice under cursor, -1 if none
 static glm::vec3 sColorWheel[16] = {
     {0.6f, 0.6f, 0.6f}, {0.6f, 0.6f, 0.6f}, {0.6f, 0.6f, 0.6f}, {0.6f, 0.6f, 0.6f},
     {0.6f, 0.6f, 0.6f}, {0.6f, 0.6f, 0.6f}, {0.6f, 0.6f, 0.6f}, {0.6f, 0.6f, 0.6f},
@@ -127,6 +129,25 @@ static void initColorWheel() {
     glBindVertexArray(0);
 }
 
+// Returns slice index 0..15 if cursor lies inside the quarter-circle wheel, else -1.
+static int wheelSliceAtCursor() {
+    double mx, my;
+    glfwGetCursorPos(ctx.window, &mx, &my);
+    float nx = (float)(mx / ctx.width) * 2.0f - 1.0f;
+    float ny = 1.0f - (float)(my / ctx.height) * 2.0f;
+    float aspect = (float)ctx.width / (float)ctx.height;
+    float dx = (nx - 1.0f) * aspect;
+    float dy = ny + 1.0f;
+    if (dx > 0.0f || dy < 0.0f) return -1;
+    float dist = sqrtf(dx * dx + dy * dy);
+    if (dist > 0.6f) return -1;
+    float deg = glm::degrees(atan2f(dy, dx));
+    int slice = (int)((deg - 90.0f) / 5.625f);
+    if (slice < 0) slice = 0;
+    if (slice > 15) slice = 15;
+    return slice;
+}
+
 static void drawColorWheel(Shader* uiShader) {
     float aspect = (float)ctx.width / (float)ctx.height;
     float radius = 0.6f;
@@ -180,6 +201,12 @@ static void drawColorWheel(Shader* uiShader) {
         glUniform4f(uiShader->loc("uColor"), 0.0f, 0.0f, 0.0f, 1.0f);
         glDrawArrays(GL_LINE_LOOP, i * 3, 3);
     }
+    // Hovered (non-selected) slice gets a thick grey outline.
+    if (sHoveredColor >= 0 && sHoveredColor < 16 && sHoveredColor != sSelectedColor) {
+        glLineWidth(3.0f);
+        glUniform4f(uiShader->loc("uColor"), 0.7f, 0.7f, 0.7f, 1.0f);
+        glDrawArrays(GL_LINE_LOOP, sHoveredColor * 3, 3);
+    }
     // Draw selected slice and outline on top
     if (sSelectedColor >= 0 && sSelectedColor < 16) {
         glm::vec3 c = sColorWheel[sSelectedColor];
@@ -225,19 +252,19 @@ static void rebuildSelectorIcons() {
 
             unsigned int iconTex = (idx == sSelectedSlot)
                 ? sBlockSelectorMinus->id : sBlockSelectorPlus->id;
-            UIElement img = createImage(id, cx, cy, sGridCellW, sGridCellH, iconTex);
-            img.onClick = [idx]() {
-                if (!sSlotMesh[idx].empty()) {
-                    sSelectedSlot = idx;
-                    setCurrentMesh(sSlotMesh[idx]);
-                    rebuildSelectorIcons();
-                }
+            auto selectSlot = [idx]() {
+                sSelectedSlot = idx;
+                if (!sSlotMesh[idx].empty()) setCurrentMesh(sSlotMesh[idx]);
+                rebuildSelectorIcons();
             };
+            UIElement img = createImage(id, cx, cy, sGridCellW, sGridCellH, iconTex);
+            img.onClick = selectSlot;
             addToGroup("sidebar", img);
 
             if (!sSlotMesh[idx].empty()) {
                 UIElement preview = createImage(id + "_preview", cx, cy, sGridCellW, sGridCellH,
                     sSlotRT[idx].textureId);
+                preview.onClick = selectSlot;
                 addToGroup("sidebar", preview);
             }
         }
@@ -472,6 +499,7 @@ void register3dModelerScene() {
             // Load block selector textures
             sBlockSelectorPlus = new Texture(EMBEDDED_SELECTOR_PLUS, EMBEDDED_SELECTOR_PLUS_SIZE);
             sBlockSelectorMinus = new Texture(EMBEDDED_SELECTOR_MINUS, EMBEDDED_SELECTOR_MINUS_SIZE);
+            sBlockSelectorTilde = new Texture(EMBEDDED_SELECTOR_TILDE, EMBEDDED_SELECTOR_TILDE_SIZE);
             sPreviewAngle = 0.0f;
             sLastPreviewTime = glfwGetTime();
 
@@ -837,8 +865,10 @@ void register3dModelerScene() {
             cleanupOverlay();
             delete sBlockSelectorPlus;
             delete sBlockSelectorMinus;
+            delete sBlockSelectorTilde;
             sBlockSelectorPlus = nullptr;
             sBlockSelectorMinus = nullptr;
+            sBlockSelectorTilde = nullptr;
             for (int i = 0; i < SELECTOR_SLOTS; i++) {
                 destroyRenderTarget(sSlotRT[i]);
                 delete sSlotPreviewMesh[i];
@@ -961,6 +991,54 @@ void register3dModelerScene() {
             sWasF5Down = f5Down;
 
             processUIInput();
+
+            // Block selector hover (build mode): any unselected slot (empty
+            // or filled) swaps its base icon to the tilde (hover) variant.
+            int hoveredSlot = -1;
+            if (sEditorMode == 0) {
+                double bmx, bmy;
+                glfwGetCursorPos(ctx.window, &bmx, &bmy);
+                float nx = (float)(bmx / ctx.width) * 2.0f - 1.0f;
+                float ny = 1.0f - (float)(bmy / ctx.height) * 2.0f;
+                for (int row = 0; row < 3 && hoveredSlot < 0; row++) {
+                    for (int col = 0; col < 5; col++) {
+                        int idx = row * 5 + col;
+                        if (idx == sSelectedSlot) continue;
+                        float cx = sGridBtnX + col * (sGridCellW + sGridPad);
+                        float cy = sGridY - row * (sGridCellH + sGridPad);
+                        if (nx >= cx && nx <= cx + sGridCellW &&
+                            ny >= cy && ny <= cy + sGridCellH) {
+                            hoveredSlot = idx;
+                            break;
+                        }
+                    }
+                }
+            }
+            for (int idx = 0; idx < SELECTOR_SLOTS; idx++) {
+                UIElement* el = getUIElement("sidebar", "block_" + std::to_string(idx));
+                if (!el) continue;
+                if (idx == sSelectedSlot)      el->textureId = sBlockSelectorMinus->id;
+                else if (idx == hoveredSlot)   el->textureId = sBlockSelectorTilde->id;
+                else                           el->textureId = sBlockSelectorPlus->id;
+            }
+
+            // Color wheel hover + click (paint mode). Wheel is raw GL so
+            // interactions live here, not in the UI manager.
+            sHoveredColor = -1;
+            if (sEditorMode == 1) {
+                double mx, my;
+                glfwGetCursorPos(ctx.window, &mx, &my);
+                if (!isPointOverUI(mx, my, ctx.width, ctx.height)) {
+                    sHoveredColor = wheelSliceAtCursor();
+                }
+                bool leftDown = glfwGetMouseButton(ctx.window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
+                if (leftDown && !sWasLeftDown && sHoveredColor >= 0) {
+                    sSelectedColor = sHoveredColor;
+                }
+                sWasLeftDown = leftDown;
+            } else {
+                sWasLeftDown = glfwGetMouseButton(ctx.window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
+            }
         },
         // onUpdate
         []() {

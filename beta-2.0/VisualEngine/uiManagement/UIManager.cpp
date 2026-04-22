@@ -13,6 +13,26 @@ static std::string sPendingConfirmId;
 static std::function<void()> sPendingAction;
 static std::string sPendingElementId;
 
+// Hover tracking — updated each frame by updateHover().
+static int sHoveredGroupIdx = -1;
+static int sHoveredElementIdx = -1;
+
+static bool isHoverable(const UIElement& e) {
+    return e.hoverable && e.visible && !e.isTextInput;
+}
+
+static void inflateForHover(UIElement& e) {
+    float dx = e.size.x * 0.025f;
+    float dy = e.size.y * 0.025f;
+    e.position.x -= dx;
+    e.position.y -= dy;
+    e.size *= 1.05f;
+    e.color.r = std::min(1.0f, e.color.r + 0.1f);
+    e.color.g = std::min(1.0f, e.color.g + 0.1f);
+    e.color.b = std::min(1.0f, e.color.b + 0.1f);
+    e.labelScale *= 1.05f;
+}
+
 // Find the currently focused text input across all groups
 static UIElement* getFocusedInput() {
     for (auto& g : sGroups) {
@@ -109,57 +129,69 @@ static void normToPixel(const UIElement& e, float& pixX, float& pixY, float& pix
     pixH = e.size.y / 2.0f * ctx.height;
 }
 
+// Hover-inflated AABB hit test for hoverable elements (5% growth, center-anchored).
+static bool hoverContainsPoint(const UIElement& e, glm::vec2 norm) {
+    float corrW = getCorrectedWidth(e);
+    float dx = corrW * 0.025f;
+    float dy = e.size.y * 0.025f;
+    return norm.x >= e.position.x - dx && norm.x <= e.position.x + corrW + dx &&
+           norm.y >= e.position.y - dy && norm.y <= e.position.y + e.size.y + dy;
+}
+
 void renderUI() {
-    for (const auto& g : sGroups) {
+    for (int gi = 0; gi < (int)sGroups.size(); gi++) {
+        const auto& g = sGroups[gi];
         if (!g.visible) continue;
-        for (const auto& e : g.elements) {
-            // Draw focused text inputs or pending confirm buttons with lighter color
+        for (int ei = 0; ei < (int)g.elements.size(); ei++) {
+            const auto& e = g.elements[ei];
             bool isPending = !sPendingConfirmId.empty() && e.requireConfirm &&
                              e.id == sPendingElementId;
-            if ((e.isTextInput && e.focused) || isPending) {
-                UIElement highlight = e;
-                highlight.color = e.color + glm::vec4(0.15f, 0.15f, 0.15f, 0.0f);
-                drawUIElement(highlight);
-            } else {
-                drawUIElement(e);
+            bool isFocusedInput = e.isTextInput && e.focused;
+            bool isHovered = gi == sHoveredGroupIdx && ei == sHoveredElementIdx;
+
+            UIElement drawCopy = e;
+            if (isFocusedInput || isPending) {
+                drawCopy.color.r = std::min(1.0f, drawCopy.color.r + 0.15f);
+                drawCopy.color.g = std::min(1.0f, drawCopy.color.g + 0.15f);
+                drawCopy.color.b = std::min(1.0f, drawCopy.color.b + 0.15f);
             }
+            if (isHovered) inflateForHover(drawCopy);
+
+            drawUIElement(drawCopy);
 
             // Draw label (buttons)
-            if (!e.label.empty() && !e.isTextInput) {
+            if (!drawCopy.label.empty() && !drawCopy.isTextInput) {
                 float pixX, pixY, pixW, pixH;
-                normToPixel(e, pixX, pixY, pixW, pixH);
-                float textW = measureText(e.label, e.labelScale);
-                float textH = measureTextHeight(e.labelScale);
-                drawText(e.label,
+                normToPixel(drawCopy, pixX, pixY, pixW, pixH);
+                float textW = measureText(drawCopy.label, drawCopy.labelScale);
+                float textH = measureTextHeight(drawCopy.labelScale);
+                drawText(drawCopy.label,
                     pixX + pixW / 2.0f - textW / 2.0f,
                     pixY - pixH / 2.0f - textH / 2.0f,
-                    e.labelScale, e.labelColor);
+                    drawCopy.labelScale, drawCopy.labelColor);
             }
 
             // Draw text input content
-            if (e.isTextInput) {
+            if (drawCopy.isTextInput) {
                 float pixX, pixY, pixW, pixH;
-                normToPixel(e, pixX, pixY, pixW, pixH);
-                float textH = measureTextHeight(e.labelScale);
+                normToPixel(drawCopy, pixX, pixY, pixW, pixH);
+                float textH = measureTextHeight(drawCopy.labelScale);
                 float padding = 8.0f;
 
-                if (e.inputText.empty() && !e.focused) {
-                    // Show placeholder
-                    drawText(e.placeholder, pixX + padding,
+                if (drawCopy.inputText.empty() && !drawCopy.focused) {
+                    drawText(drawCopy.placeholder, pixX + padding,
                         pixY - pixH / 2.0f - textH / 2.0f,
-                        e.labelScale, {0.5f, 0.5f, 0.5f, 0.7f});
+                        drawCopy.labelScale, {0.5f, 0.5f, 0.5f, 0.7f});
                 } else {
-                    // Show typed text + cursor
-                    std::string display = e.inputText;
-                    if (e.focused) {
-                        // Blinking cursor
+                    std::string display = drawCopy.inputText;
+                    if (drawCopy.focused) {
                         double time = glfwGetTime();
                         if (((int)(time * 2.0)) % 2 == 0)
                             display += "|";
                     }
                     drawText(display, pixX + padding,
                         pixY - pixH / 2.0f - textH / 2.0f,
-                        e.labelScale, e.labelColor);
+                        drawCopy.labelScale, drawCopy.labelColor);
                 }
             }
         }
@@ -172,6 +204,26 @@ static glm::vec2 screenToNorm(double mx, double my, int w, int h) {
         (float)(mx / w) * 2.0f - 1.0f,
         1.0f - (float)(my / h) * 2.0f
     );
+}
+
+static void updateHover() {
+    double mx, my;
+    glfwGetCursorPos(ctx.window, &mx, &my);
+    glm::vec2 norm = screenToNorm(mx, my, ctx.width, ctx.height);
+    sHoveredGroupIdx = -1;
+    sHoveredElementIdx = -1;
+    for (int gi = (int)sGroups.size() - 1; gi >= 0; gi--) {
+        if (!sGroups[gi].visible) continue;
+        for (int ei = (int)sGroups[gi].elements.size() - 1; ei >= 0; ei--) {
+            const UIElement& e = sGroups[gi].elements[ei];
+            if (!isHoverable(e)) continue;
+            if (hoverContainsPoint(e, norm)) {
+                sHoveredGroupIdx = gi;
+                sHoveredElementIdx = ei;
+                return;
+            }
+        }
+    }
 }
 
 static void processTextInput() {
@@ -227,6 +279,8 @@ static void processTextInput() {
 }
 
 void processUIInput() {
+    updateHover();
+
     bool leftDown = glfwGetMouseButton(ctx.window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
     if (leftDown && !sWasLeftDown) {
         double mx, my;
@@ -252,8 +306,14 @@ bool handleUIClick(double mouseX, double mouseY, int screenWidth, int screenHeig
             if (!e.visible) continue;
 
             float corrW = getCorrectedWidth(e);
-            if (norm.x >= e.position.x && norm.x <= e.position.x + corrW &&
-                norm.y >= e.position.y && norm.y <= e.position.y + e.size.y) {
+            bool inside;
+            if (e.hoverable) {
+                inside = hoverContainsPoint(e, norm);
+            } else {
+                inside = norm.x >= e.position.x && norm.x <= e.position.x + corrW &&
+                         norm.y >= e.position.y && norm.y <= e.position.y + e.size.y;
+            }
+            if (inside) {
 
                 if (e.isTextInput) {
                     e.focused = true;
@@ -292,6 +352,32 @@ bool handleUIClick(double mouseX, double mouseY, int screenWidth, int screenHeig
 
     // Clicked empty space — cancel pending
     cancelPendingConfirm();
+    return false;
+}
+
+bool isPointOverUI(double mouseX, double mouseY, int screenWidth, int screenHeight) {
+    glm::vec2 norm = screenToNorm(mouseX, mouseY, screenWidth, screenHeight);
+    for (int gi = (int)sGroups.size() - 1; gi >= 0; gi--) {
+        const UIGroup& g = sGroups[gi];
+        if (!g.visible) continue;
+        for (int ei = (int)g.elements.size() - 1; ei >= 0; ei--) {
+            const UIElement& e = g.elements[ei];
+            if (!e.visible) continue;
+            // Skip decorative elements (panels, images with no click behavior).
+            bool interactive = (bool)e.onClick || e.isTextInput ||
+                               e.requireConfirm || !e.confirmId.empty();
+            if (!interactive) continue;
+            float corrW = getCorrectedWidth(e);
+            bool inside;
+            if (e.hoverable) {
+                inside = hoverContainsPoint(e, norm);
+            } else {
+                inside = norm.x >= e.position.x && norm.x <= e.position.x + corrW &&
+                         norm.y >= e.position.y && norm.y <= e.position.y + e.size.y;
+            }
+            if (inside) return true;
+        }
+    }
     return false;
 }
 
@@ -334,6 +420,7 @@ void createDropdown(const std::string& groupId, const std::string& id,
     btn.size = glm::vec2(w, h);
     btn.color = color;
     btn.label = label;
+    btn.hoverable = true;
     btn.onClick = [dropGroupId, id, x, y, w, h, color, offsetX, offsetY,
                    optionsCopy, onSelectCopy, groupId]() {
         // Toggle: if group exists, remove it; otherwise create it
@@ -366,6 +453,7 @@ void createDropdown(const std::string& groupId, const std::string& id,
             opt.size = glm::vec2(w, h);
             opt.color = optColor;
             opt.label = optLabel;
+            opt.hoverable = true;
             opt.onClick = [cb, idx, optLabel, dgid, mainBtnGroup, mainBtnId]() {
                 // Update the main button label before removing anything
                 UIElement* mainBtn = getUIElement(mainBtnGroup, mainBtnId);
