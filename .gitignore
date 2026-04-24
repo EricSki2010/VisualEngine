@@ -16,3 +16,13 @@
 # OS
 Thumbs.db
 Desktop.ini
+
+# Secrets
+.gemini_key
+
+# AI toggle state (per-machine)
+ai_enabled.txt
+
+# Python
+__pycache__/
+*.pyc

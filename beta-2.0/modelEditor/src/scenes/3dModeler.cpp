@@ -26,30 +26,37 @@
 #include <vector>
 #include <fstream>
 #include <iostream>
+#include <random>
 #include "../prefabs/3D_modeler/prefab_cube.h"
 #include "../prefabs/EmbeddedSelectors.h"
 #include "../prefabs/3D_modeler/prefab_wedge.h"
+#include "../mechanics/AiHandling/AiHandling.h"
+#include "../mechanics/AiHandling/AiTools.h"
+#include "../../../VisualEngine/sceneManagement/SceneManager.h"
 
 static bool sPaused = false;
 static bool sWasEscDown = false;
-static bool sWasCtrlTabDown = false;
+static bool sWasSpaceDown = false;
 static bool sWasCtrlZDown = false;
 static bool sWasF5Down = false;
 static bool sWasLeftDown = false;
 static Texture* sBlockSelectorPlus = nullptr;
 static Texture* sBlockSelectorMinus = nullptr;
 static Texture* sBlockSelectorTilde = nullptr;
-static const int SELECTOR_SLOTS = 15;
-static std::string sSlotMesh[SELECTOR_SLOTS]; // empty = unassigned
-static int sSelectedSlot = -1;
-static RenderTarget sSlotRT[SELECTOR_SLOTS];
+static const int SLOTS_PER_PAGE = 15;
+static std::vector<std::string> sSlotMesh;       // empty = unassigned; size = sPageCount*SLOTS_PER_PAGE
+static std::vector<RenderTarget> sSlotRT;
+static std::vector<Mesh*> sSlotPreviewMesh;
+static int sSelectedSlot = -1;                   // global index
+static int sSlotPage = 0;                        // currently visible pack
+static int sPageCount = 1;                       // number of 15-slot packs
 static float sGridCellW = 0, sGridCellH = 0, sGridPad = 0, sGridBtnX = 0, sGridY = 0;
 static float sSideBtnW = 0, sSideBtnH = 0, sSideBtnX = 0, sSidePad = 0;
-static Mesh* sSlotPreviewMesh[SELECTOR_SLOTS] = {};
 static float sPreviewAngle = 0.0f;
 static double sLastPreviewTime = 0.0;
 static int sEditorMode = 0; // 0 = Build, 1 = Paint
 static bool sColorEditOpen = false;
+static glm::vec3 sPreEditColor{0.6f, 0.6f, 0.6f}; // snapshot taken when color edit panel opens, used by Cancel
 static int sColorMode = 0; // 0 = RGB, 1 = Hex, 2 = Color Wheel
 static std::function<void()> sRebuildColorInputs;
 static std::function<void()> sRebuildActionButton;
@@ -179,6 +186,8 @@ static void drawColorWheel(Shader* uiShader) {
     glUniform1i(uiShader->loc("uUseTexture"), 0);
     glUniform2f(uiShader->loc("uPosition"), 0.0f, 0.0f);
     glUniform2f(uiShader->loc("uSize"), 1.0f, 1.0f);
+    // The UI shader's rounded-corner SDF would clip the wheel away; disable it.
+    glUniform1f(uiShader->loc("uCornerRadius"), 0.0f);
 
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
@@ -231,9 +240,103 @@ static std::string sModelName;
 static ModelFile sCurrentModel;
 
 
+static void rebuildSelectorIcons();
+static void rebuildPackDropdown();
+
+static void clearSlotRT(int i) {
+    bindRenderTarget(sSlotRT[i]);
+    glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    unbindRenderTarget(ctx.width, ctx.height);
+}
+
+static void allocSlotResources(int newSize) {
+    int oldSize = (int)sSlotMesh.size();
+    if (newSize <= oldSize) return;
+    sSlotMesh.resize(newSize, "");
+    sSlotRT.resize(newSize);
+    sSlotPreviewMesh.resize(newSize, nullptr);
+    for (int i = oldSize; i < newSize; i++) {
+        sSlotRT[i] = createRenderTarget(128, 128);
+        clearSlotRT(i);
+    }
+}
+
+// Derive pack count from existing slot_*.mesh files so packs persist across runs
+// as long as each pack has at least one filled slot. An empty trailing pack is
+// not remembered.
+static int discoverPageCount() {
+    int maxIdx = -1;
+    std::error_code ec;
+    std::filesystem::path dir("assets/saves/vectorMeshes");
+    if (std::filesystem::exists(dir, ec) && std::filesystem::is_directory(dir, ec)) {
+        for (auto& e : std::filesystem::directory_iterator(dir, ec)) {
+            if (e.path().extension() != ".mesh") continue;
+            std::string stem = e.path().stem().string();
+            if (stem.rfind("slot_", 0) != 0) continue;
+            try {
+                int n = std::stoi(stem.substr(5));
+                if (n > maxIdx) maxIdx = n;
+            } catch (...) {}
+        }
+    }
+    if (maxIdx < 0) return 1;
+    return (maxIdx / SLOTS_PER_PAGE) + 1;
+}
+
+static void addPack() {
+    allocSlotResources((sPageCount + 1) * SLOTS_PER_PAGE);
+    sPageCount++;
+}
+
+// Clears all 15 slots in the given pack (deletes .mesh files + in-memory state).
+// The first pack cannot be deleted. Trailing empty packs are trimmed so the
+// on-disk state matches the in-memory pack count.
+static void deletePack(int pageIdx) {
+    if (pageIdx <= 0 || pageIdx >= sPageCount) return;
+    int start = pageIdx * SLOTS_PER_PAGE;
+    int end   = start + SLOTS_PER_PAGE;
+    if (end > (int)sSlotMesh.size()) end = (int)sSlotMesh.size();
+
+    for (int i = start; i < end; i++) {
+        if (!sSlotMesh[i].empty() && sSlotMesh[i] != "cube" && sSlotMesh[i] != "wedge") {
+            std::string path = "assets/saves/vectorMeshes/" + sSlotMesh[i] + ".mesh";
+            std::error_code ec;
+            std::filesystem::remove(path, ec);
+        }
+        sSlotMesh[i] = "";
+        if (sSlotPreviewMesh[i]) { delete sSlotPreviewMesh[i]; sSlotPreviewMesh[i] = nullptr; }
+        clearSlotRT(i);
+    }
+
+    int newPages = sPageCount;
+    while (newPages > 1) {
+        int s = (newPages - 1) * SLOTS_PER_PAGE;
+        int e = s + SLOTS_PER_PAGE;
+        bool allEmpty = true;
+        for (int i = s; i < e && i < (int)sSlotMesh.size(); i++)
+            if (!sSlotMesh[i].empty()) { allEmpty = false; break; }
+        if (!allEmpty) break;
+        for (int i = s; i < e && i < (int)sSlotMesh.size(); i++) {
+            destroyRenderTarget(sSlotRT[i]);
+            if (sSlotPreviewMesh[i]) { delete sSlotPreviewMesh[i]; sSlotPreviewMesh[i] = nullptr; }
+        }
+        newPages--;
+    }
+    if (newPages != sPageCount) {
+        sPageCount = newPages;
+        int sz = sPageCount * SLOTS_PER_PAGE;
+        sSlotMesh.resize(sz);
+        sSlotRT.resize(sz);
+        sSlotPreviewMesh.resize(sz);
+    }
+    if (sSlotPage >= sPageCount) sSlotPage = sPageCount - 1;
+    if (sSelectedSlot >= (int)sSlotMesh.size()) sSelectedSlot = 0;
+}
+
 static void rebuildSelectorIcons() {
-    // Remove old selector icons and previews
-    for (int i = 0; i < SELECTOR_SLOTS; i++) {
+    // Remove old selector icons and previews for the visible page
+    for (int i = 0; i < SLOTS_PER_PAGE; i++) {
         removeFromGroup("sidebar", "block_" + std::to_string(i));
         removeFromGroup("sidebar", "block_" + std::to_string(i) + "_preview");
     }
@@ -247,28 +350,72 @@ static void rebuildSelectorIcons() {
         for (int col = 0; col < cols; col++) {
             float cx = sGridBtnX + col * (sGridCellW + sGridPad);
             float cy = sGridY - row * (sGridCellH + sGridPad);
-            int idx = row * cols + col;
-            std::string id = "block_" + std::to_string(idx);
+            int localIdx = row * cols + col;
+            int globalIdx = sSlotPage * SLOTS_PER_PAGE + localIdx;
+            if (globalIdx >= (int)sSlotMesh.size()) continue;
+            std::string id = "block_" + std::to_string(localIdx);
 
-            unsigned int iconTex = (idx == sSelectedSlot)
+            unsigned int iconTex = (globalIdx == sSelectedSlot)
                 ? sBlockSelectorMinus->id : sBlockSelectorPlus->id;
-            auto selectSlot = [idx]() {
-                sSelectedSlot = idx;
-                if (!sSlotMesh[idx].empty()) setCurrentMesh(sSlotMesh[idx]);
+            auto selectSlot = [globalIdx]() {
+                sSelectedSlot = globalIdx;
+                if (!sSlotMesh[globalIdx].empty()) setCurrentMesh(sSlotMesh[globalIdx]);
                 rebuildSelectorIcons();
             };
             UIElement img = createImage(id, cx, cy, sGridCellW, sGridCellH, iconTex);
             img.onClick = selectSlot;
             addToGroup("sidebar", img);
 
-            if (!sSlotMesh[idx].empty()) {
+            if (!sSlotMesh[globalIdx].empty()) {
                 UIElement preview = createImage(id + "_preview", cx, cy, sGridCellW, sGridCellH,
-                    sSlotRT[idx].textureId);
+                    sSlotRT[globalIdx].textureId);
                 preview.onClick = selectSlot;
                 addToGroup("sidebar", preview);
             }
         }
     }
+}
+
+static void rebuildPackDropdown() {
+    removeFromGroup("sidebar", "pack_select");
+    removeUIGroup("pack_select_dropdown");
+    if (sEditorMode != 0) return;
+
+    // Position just above the top row of the grid
+    float y = sGridY + sGridCellH + 0.015f;
+    glm::vec4 color = {0.25f, 0.25f, 0.3f, 0.95f};
+
+    std::vector<std::string> options;
+    options.reserve(sPageCount + 1);
+    for (int p = 0; p < sPageCount; p++) {
+        int lo = p * SLOTS_PER_PAGE + 1;
+        int hi = (p + 1) * SLOTS_PER_PAGE;
+        options.push_back("Pack " + std::to_string(p + 1) +
+                          " (" + std::to_string(lo) + "-" + std::to_string(hi) + ")");
+    }
+    options.push_back("+ Add Pack");
+
+    int lo = sSlotPage * SLOTS_PER_PAGE + 1;
+    int hi = (sSlotPage + 1) * SLOTS_PER_PAGE;
+    std::string label = "Pack " + std::to_string(sSlotPage + 1) +
+                        " (" + std::to_string(lo) + "-" + std::to_string(hi) + ")";
+
+    // Options cascade upward so they don't cover the grid below.
+    float optStep = sSideBtnH + 0.01f;
+    createDropdown("sidebar", "pack_select",
+                   sSideBtnX, y, sSideBtnW, sSideBtnH,
+                   color, label, options,
+                   [](int idx, const std::string& /*optLabel*/) {
+                       if (idx == sPageCount) {
+                           addPack();
+                           sSlotPage = sPageCount - 1;
+                       } else {
+                           sSlotPage = idx;
+                       }
+                       rebuildPackDropdown();
+                       rebuildSelectorIcons();
+                   },
+                   0.0f, optStep);
 }
 
 static int ensureBlockType(const std::string& meshName) {
@@ -472,15 +619,90 @@ void register3dModelerScene() {
                 {0.12f, 0.12f, 0.12f, 0.85f}
             ));
 
+            // Left-side AI panel: response display (top), prompt input, Send button.
+            if (AI::isEnabled()) {
+                float aiPanelX = -1.0f;
+                float aiPanelW = 0.4f;
+                float aiPad = 0.02f;
+                float aiBtnW = aiPanelW - aiPad * 2;
+                float aiBtnX = aiPanelX + aiPad;
+                float aiBtnH = 0.06f;
+
+                addUIGroup("ai_panel");
+                addToGroup("ai_panel", createPanel("ai_bg",
+                    aiPanelX, -1.0f, aiPanelW, 2.0f,
+                    {0.12f, 0.12f, 0.12f, 0.85f}
+                ));
+
+                // Response display: dark frame with 8 pre-allocated text rows
+                // on top that we fill in by word-wrapping the current response.
+                const float aiRespBottom = 0.50f;
+                const float aiRespHeight = 0.45f;
+                const int   aiRespLines  = 8;
+                const float aiLineH = aiRespHeight / aiRespLines;
+
+                addToGroup("ai_panel", createPanel("ai_response",
+                    aiBtnX, aiRespBottom, aiBtnW, aiRespHeight,
+                    {0.16f, 0.16f, 0.20f, 0.85f}
+                ));
+                for (int i = 0; i < aiRespLines; i++) {
+                    UIElement line = createPanel(
+                        "ai_line_" + std::to_string(i),
+                        aiBtnX,
+                        aiRespBottom + aiRespHeight - (i + 1) * aiLineH,
+                        aiBtnW, aiLineH,
+                        {0.0f, 0.0f, 0.0f, 0.0f}
+                    );
+                    line.labelScale = 0.25f;
+                    line.labelColor = {0.88f, 0.88f, 0.88f, 1.0f};
+                    line.label = (i == 0) ? "Ready" : "";
+                    addToGroup("ai_panel", line);
+                }
+
+                UIElement promptEl = createTextInput("ai_prompt",
+                    aiBtnX, 0.42f, aiBtnW, aiBtnH,
+                    {0.18f, 0.18f, 0.22f, 0.95f},
+                    "Ask AI...", 200);
+                // Intentionally no onUnfocus: clicking away just unfocuses.
+                // Submission happens only via the Send button.
+                promptEl.multiline = true;
+                addToGroup("ai_panel", promptEl);
+
+                addToGroup("ai_panel", createButton("ai_send",
+                    aiBtnX, 0.34f, aiBtnW, aiBtnH,
+                    {0.25f, 0.40f, 0.60f, 0.95f}, "Send",
+                    []() {
+                        std::string text = getInputText("ai_panel", "ai_prompt");
+                        if (text.empty()) return;
+                        AI::submitPrompt(text);
+                        if (auto* in = getUIElement("ai_panel", "ai_prompt"))
+                            in->inputText.clear();
+                    }
+                ));
+
+                addToGroup("ai_panel", createButton("ai_send_ctx",
+                    aiBtnX, 0.26f, aiBtnW, aiBtnH,
+                    {0.35f, 0.30f, 0.55f, 0.95f}, "Send + Info",
+                    []() {
+                        std::string text = getInputText("ai_panel", "ai_prompt");
+                        if (text.empty()) return;
+                        AI::submitPromptWithContext(text);
+                        if (auto* in = getUIElement("ai_panel", "ai_prompt"))
+                            in->inputText.clear();
+                    }
+                ));
+            }
+
             // Reset slots only on first entry
             if (sFirstEntry) {
-                for (int i = 0; i < SELECTOR_SLOTS; i++)
-                    sSlotMesh[i] = "";
+                sSlotPage = 0;
+                sPageCount = discoverPageCount();
+                sSlotMesh.assign(sPageCount * SLOTS_PER_PAGE, "");
                 sSlotMesh[0] = "cube";
                 sSlotMesh[1] = "wedge";
 
                 // Restore custom slots from existing .mesh files
-                for (int i = 0; i < SELECTOR_SLOTS; i++) {
+                for (int i = 0; i < (int)sSlotMesh.size(); i++) {
                     if (!sSlotMesh[i].empty()) continue;
                     std::string slotName = "slot_" + std::to_string(i);
                     std::string meshPath = "assets/saves/vectorMeshes/" + slotName + ".mesh";
@@ -503,8 +725,10 @@ void register3dModelerScene() {
             sPreviewAngle = 0.0f;
             sLastPreviewTime = glfwGetTime();
 
+            int totalSlots = (int)sSlotMesh.size();
+
             // Reload all custom slot meshes from files
-            for (int i = 0; i < SELECTOR_SLOTS; i++) {
+            for (int i = 0; i < totalSlots; i++) {
                 if (sSlotMesh[i].empty() || sSlotMesh[i] == "cube" || sSlotMesh[i] == "wedge")
                     continue;
                 std::string meshPath = "assets/saves/vectorMeshes/" + sSlotMesh[i] + ".mesh";
@@ -516,14 +740,11 @@ void register3dModelerScene() {
             }
 
             // Create render targets and preview meshes for slots
-            for (int i = 0; i < SELECTOR_SLOTS; i++) {
+            sSlotRT.assign(totalSlots, RenderTarget{});
+            sSlotPreviewMesh.assign(totalSlots, nullptr);
+            for (int i = 0; i < totalSlots; i++) {
                 sSlotRT[i] = createRenderTarget(128, 128);
-                // Clear the render target to transparent
-                bindRenderTarget(sSlotRT[i]);
-                glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
-                glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-                unbindRenderTarget(ctx.width, ctx.height);
-                sSlotPreviewMesh[i] = nullptr;
+                clearSlotRT(i);
                 if (!sSlotMesh[i].empty()) {
                     const RegisteredMesh* reg = getRegisteredMesh(sSlotMesh[i].c_str());
                     if (reg) {
@@ -552,13 +773,15 @@ void register3dModelerScene() {
                 float gridTotalH = rows * (sGridCellH + sGridPad) - sGridPad;
                 sGridY = -1.0f + panelPad + gridTotalH;
             }
-            rebuildSelectorIcons();
 
             // Store sidebar layout for later use
             sSideBtnW = btnW;
             sSideBtnH = btnH;
             sSideBtnX = btnX;
             sSidePad = panelPad;
+
+            rebuildSelectorIcons();
+            rebuildPackDropdown();
 
             // Action button (changes based on editor mode)
             {
@@ -594,9 +817,12 @@ void register3dModelerScene() {
                             }
                         ));
                     } else {
+                        glm::vec4 actionBtnColor = sColorEditOpen
+                            ? glm::vec4{0.4f, 0.25f, 0.25f, 0.95f}
+                            : glm::vec4{0.3f, 0.25f, 0.25f, 0.95f};
                         addToGroup("sidebar", createButton("action_btn",
                             btnX, actionBtnY, btnW, btnH,
-                            {0.3f, 0.25f, 0.25f, 0.95f}, "Edit Color",
+                            actionBtnColor, sColorEditOpen ? "Cancel" : "Edit Color",
                             [btnX, btnW, btnH, actionBtnY]() {
                                 sColorEditOpen = !sColorEditOpen;
                                 auto closeColorEdit = []() {
@@ -605,9 +831,24 @@ void register3dModelerScene() {
                                     removeUIGroup("color_mode_dropdown");
                                     UIElement* editorMode = getUIElement("sidebar", "editor_mode");
                                     if (editorMode) editorMode->visible = true;
+                                    UIElement* actionBtn = getUIElement("sidebar", "action_btn");
+                                    if (actionBtn) {
+                                        actionBtn->label = "Edit Color";
+                                        actionBtn->color = {0.3f, 0.25f, 0.25f, 0.95f};
+                                    }
                                 };
 
                                 if (sColorEditOpen) {
+                                    // Snapshot current color so Cancel can revert
+                                    if (sSelectedColor >= 0 && sSelectedColor < 16)
+                                        sPreEditColor = sColorWheel[sSelectedColor];
+
+                                    UIElement* actionBtn = getUIElement("sidebar", "action_btn");
+                                    if (actionBtn) {
+                                        actionBtn->label = "Cancel";
+                                        actionBtn->color = {0.4f, 0.25f, 0.25f, 0.95f};
+                                    }
+
                                     // Hide editor mode dropdown
                                     UIElement* editorMode = getUIElement("sidebar", "editor_mode");
                                     if (editorMode) editorMode->visible = false;
@@ -740,6 +981,12 @@ void register3dModelerScene() {
                                     sRebuildColorInputs = buildInputs;
                                     buildInputs();
                                 } else {
+                                    // Cancel: revert color to snapshot taken when panel opened
+                                    if (sSelectedColor >= 0 && sSelectedColor < 16) {
+                                        sColorWheel[sSelectedColor] = sPreEditColor;
+                                        setPaintPalette(sColorWheel);
+                                        ctx.needsRebuild = true;
+                                    }
                                     closeColorEdit();
                                 }
                             }
@@ -761,6 +1008,7 @@ void register3dModelerScene() {
                     sEditorMode = index;
                     clearSelection();
                     rebuildSelectorIcons();
+                    rebuildPackDropdown();
                     if (sRebuildActionButton) sRebuildActionButton();
                     if (sEditorMode == 1 && sSelectedColor < 0)
                         sSelectedColor = 0;
@@ -869,7 +1117,7 @@ void register3dModelerScene() {
             sBlockSelectorPlus = nullptr;
             sBlockSelectorMinus = nullptr;
             sBlockSelectorTilde = nullptr;
-            for (int i = 0; i < SELECTOR_SLOTS; i++) {
+            for (int i = 0; i < (int)sSlotRT.size(); i++) {
                 destroyRenderTarget(sSlotRT[i]);
                 delete sSlotPreviewMesh[i];
                 sSlotPreviewMesh[i] = nullptr;
@@ -882,6 +1130,71 @@ void register3dModelerScene() {
         },
         // onInput
         [](float dt) {
+            AI::update(dt);
+
+            // Grow the AI prompt vertically to fit its current text; reposition
+            // Send below it. Top edge stays anchored at 0.48.
+            if (auto* input = getUIElement("ai_panel", "ai_prompt")) {
+                const float kBaseH = 0.06f;    // one-line height (matches initial)
+                const float kLineGrow = 0.05f; // extra height per additional line
+                const float kTopEdge = 0.48f;
+                int lines = inputWrappedLineCount(*input);
+                float newH = kBaseH + kLineGrow * (float)std::max(0, lines - 1);
+                input->size.y = newH;
+                input->position.y = kTopEdge - newH;
+                if (auto* send = getUIElement("ai_panel", "ai_send")) {
+                    send->position.y = input->position.y - 0.02f - 0.06f;
+                    if (auto* sendCtx = getUIElement("ai_panel", "ai_send_ctx")) {
+                        sendCtx->position.y = send->position.y - 0.02f - 0.06f;
+                    }
+                }
+            }
+
+            // Mirror AI status/response into the left panel's 8-row text area,
+            // word-wrapping to fit the panel width.
+            {
+                std::string response = AI::getLastResponse();
+                std::string display = !response.empty() ? response : AI::getStatus();
+
+                const size_t kCharsPerLine = 26;
+                const int kRows = 8;
+                std::vector<std::string> lines;
+                std::string cur, word;
+                auto flushWord = [&]() {
+                    if (word.empty()) return;
+                    if (cur.empty()) cur = word;
+                    else if (cur.size() + 1 + word.size() <= kCharsPerLine) cur += " " + word;
+                    else { lines.push_back(cur); cur = word; }
+                    word.clear();
+                };
+                for (char c : display) {
+                    if (c == '\n') { flushWord(); if (!cur.empty()) { lines.push_back(cur); cur.clear(); } }
+                    else if (c == ' ' || c == '\t') { flushWord(); }
+                    else {
+                        word += c;
+                        if (word.size() > kCharsPerLine) {
+                            if (!cur.empty()) { lines.push_back(cur); cur.clear(); }
+                            lines.push_back(word.substr(0, kCharsPerLine));
+                            word = word.substr(kCharsPerLine);
+                        }
+                    }
+                }
+                flushWord();
+                if (!cur.empty()) lines.push_back(cur);
+                if ((int)lines.size() > kRows) {
+                    lines.resize(kRows);
+                    std::string& last = lines.back();
+                    if (last.size() > kCharsPerLine - 3) last.resize(kCharsPerLine - 3);
+                    last += "...";
+                }
+
+                for (int i = 0; i < kRows; i++) {
+                    std::string id = "ai_line_" + std::to_string(i);
+                    if (auto* el = getUIElement("ai_panel", id))
+                        el->label = (i < (int)lines.size()) ? lines[i] : "";
+                }
+            }
+
             // Build mode = AABB selection, Paint mode = per-triangle
             setForceRectangularRaycast(sEditorMode == 0);
 
@@ -917,36 +1230,50 @@ void register3dModelerScene() {
                 sSelectedColor = (sSelectedColor + dir + 16) % 16;
             }
             if (ctx.scrollDelta != 0.0f && sEditorMode == 0) {
-                int dir = (ctx.scrollDelta > 0.0f) ? -1 : 1;
-                sSelectedSlot = (sSelectedSlot + dir + SELECTOR_SLOTS) % SELECTOR_SLOTS;
-                if (!sSlotMesh[sSelectedSlot].empty())
-                    setCurrentMesh(sSlotMesh[sSelectedSlot]);
-                rebuildSelectorIcons();
+                int total = (int)sSlotMesh.size();
+                if (total > 0) {
+                    int dir = (ctx.scrollDelta > 0.0f) ? -1 : 1;
+                    int prevPage = sSlotPage;
+                    sSelectedSlot = (sSelectedSlot + dir + total) % total;
+                    sSlotPage = sSelectedSlot / SLOTS_PER_PAGE;
+                    if (!sSlotMesh[sSelectedSlot].empty())
+                        setCurrentMesh(sSlotMesh[sSelectedSlot]);
+                    if (sSlotPage != prevPage) rebuildPackDropdown();
+                    rebuildSelectorIcons();
+                }
             }
 
-            // Ctrl+Tab: shortcut for Edit Object (build mode only) - fires on release
+            // Space: shortcut for Edit Object (build) / Edit Color (paint) - fires on release.
+            // Ignored while in camera movement mode so space can be used for jump/up.
             bool ctrlHeld = glfwGetKey(ctx.window, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS;
-            bool tabDown = glfwGetKey(ctx.window, GLFW_KEY_TAB) == GLFW_PRESS;
-            bool ctrlTab = ctrlHeld && tabDown;
-            if (!ctrlTab && sWasCtrlTabDown && sEditorMode == 0) {
-                const std::string& cur = sSlotMesh[sSelectedSlot];
-                bool isPrefab = false;
-                if (!cur.empty()) {
-                    const RegisteredMesh* reg = getRegisteredMesh(cur.c_str());
-                    if (reg && reg->isPrefab) isPrefab = true;
-                }
-                if (!isPrefab) {
-                    saveCurrentModel();
-                    std::string meshName = cur.empty()
-                        ? "slot_" + std::to_string(sSelectedSlot)
-                        : cur;
-                    sPendingSlotUpdate = sSelectedSlot;
-                    sPendingSlotMesh = meshName;
-                    auto* editData = new VectorMeshEditData{meshName, sSelectedSlot, sModelName};
-                    VE::setScene("vectorMesh", editData);
+            Camera* spaceCam = getGlobalCamera();
+            bool inMovement = spaceCam && spaceCam->looking;
+            bool spaceDown = !inMovement && !isAnyInputFocused()
+                             && glfwGetKey(ctx.window, GLFW_KEY_SPACE) == GLFW_PRESS;
+            if (!spaceDown && sWasSpaceDown) {
+                if (sEditorMode == 0) {
+                    const std::string& cur = sSlotMesh[sSelectedSlot];
+                    bool isPrefab = false;
+                    if (!cur.empty()) {
+                        const RegisteredMesh* reg = getRegisteredMesh(cur.c_str());
+                        if (reg && reg->isPrefab) isPrefab = true;
+                    }
+                    if (!isPrefab) {
+                        saveCurrentModel();
+                        std::string meshName = cur.empty()
+                            ? "slot_" + std::to_string(sSelectedSlot)
+                            : cur;
+                        sPendingSlotUpdate = sSelectedSlot;
+                        sPendingSlotMesh = meshName;
+                        auto* editData = new VectorMeshEditData{meshName, sSelectedSlot, sModelName};
+                        VE::setScene("vectorMesh", editData);
+                    }
+                } else {
+                    UIElement* actionBtn = getUIElement("sidebar", "action_btn");
+                    if (actionBtn && actionBtn->onClick) actionBtn->onClick();
                 }
             }
-            sWasCtrlTabDown = ctrlTab;
+            sWasSpaceDown = spaceDown;
 
             // Ctrl+Z: undo
             bool zDown = glfwGetKey(ctx.window, GLFW_KEY_Z) == GLFW_PRESS;
@@ -994,7 +1321,7 @@ void register3dModelerScene() {
 
             // Block selector hover (build mode): any unselected slot (empty
             // or filled) swaps its base icon to the tilde (hover) variant.
-            int hoveredSlot = -1;
+            int hoveredSlot = -1; // global idx
             if (sEditorMode == 0) {
                 double bmx, bmy;
                 glfwGetCursorPos(ctx.window, &bmx, &bmy);
@@ -1002,24 +1329,27 @@ void register3dModelerScene() {
                 float ny = 1.0f - (float)(bmy / ctx.height) * 2.0f;
                 for (int row = 0; row < 3 && hoveredSlot < 0; row++) {
                     for (int col = 0; col < 5; col++) {
-                        int idx = row * 5 + col;
-                        if (idx == sSelectedSlot) continue;
+                        int localIdx = row * 5 + col;
+                        int globalIdx = sSlotPage * SLOTS_PER_PAGE + localIdx;
+                        if (globalIdx >= (int)sSlotMesh.size()) continue;
+                        if (globalIdx == sSelectedSlot) continue;
                         float cx = sGridBtnX + col * (sGridCellW + sGridPad);
                         float cy = sGridY - row * (sGridCellH + sGridPad);
                         if (nx >= cx && nx <= cx + sGridCellW &&
                             ny >= cy && ny <= cy + sGridCellH) {
-                            hoveredSlot = idx;
+                            hoveredSlot = globalIdx;
                             break;
                         }
                     }
                 }
             }
-            for (int idx = 0; idx < SELECTOR_SLOTS; idx++) {
-                UIElement* el = getUIElement("sidebar", "block_" + std::to_string(idx));
+            for (int localIdx = 0; localIdx < SLOTS_PER_PAGE; localIdx++) {
+                UIElement* el = getUIElement("sidebar", "block_" + std::to_string(localIdx));
                 if (!el) continue;
-                if (idx == sSelectedSlot)      el->textureId = sBlockSelectorMinus->id;
-                else if (idx == hoveredSlot)   el->textureId = sBlockSelectorTilde->id;
-                else                           el->textureId = sBlockSelectorPlus->id;
+                int globalIdx = sSlotPage * SLOTS_PER_PAGE + localIdx;
+                if (globalIdx == sSelectedSlot)      el->textureId = sBlockSelectorMinus->id;
+                else if (globalIdx == hoveredSlot)   el->textureId = sBlockSelectorTilde->id;
+                else                                 el->textureId = sBlockSelectorPlus->id;
             }
 
             // Color wheel hover + click (paint mode). Wheel is raw GL so
@@ -1066,7 +1396,7 @@ void register3dModelerScene() {
             sPreviewAngle += 15.0f * dt; // 15 degrees per second
             if (sPreviewAngle > 360.0f) sPreviewAngle -= 360.0f;
 
-            for (int i = 0; i < SELECTOR_SLOTS; i++) {
+            for (int i = 0; i < (int)sSlotPreviewMesh.size(); i++) {
                 if (!sSlotPreviewMesh[i]) continue;
 
                 bindRenderTarget(sSlotRT[i]);
@@ -1134,4 +1464,168 @@ void register3dModelerScene() {
                 drawColorWheel(getUIShader());
         }
     );
+
+    // ---- AI tools ----------------------------------------------------------
+    // Tools mutate scene state directly; they refuse unless the 3dModeler scene
+    // is active. Each mutating tool pushes one undo step so Ctrl+Z reverts it.
+    auto require3dModeler = []() {
+        if (getActiveSceneName() != "3dModeler")
+            throw std::runtime_error("tool requires the 3dModeler scene to be active");
+    };
+
+    AI::registerTool("set_palette_color", [require3dModeler](const AI::Json& a) -> AI::Json {
+        require3dModeler();
+        int slot = a.at("slot").get<int>();
+        if (slot < 0 || slot >= 16) throw std::runtime_error("slot must be 0..15");
+        float r = a.at("r").get<float>();
+        float g = a.at("g").get<float>();
+        float b = a.at("b").get<float>();
+        pushUndo();
+        sColorWheel[slot] = glm::vec3(r, g, b);
+        setPaintPalette(sColorWheel);
+        return AI::Json{{"slot", slot}, {"r", r}, {"g", g}, {"b", b}};
+    });
+
+    AI::registerTool("get_palette", [require3dModeler](const AI::Json&) -> AI::Json {
+        require3dModeler();
+        AI::Json arr = AI::Json::array();
+        for (int i = 0; i < 16; i++) {
+            arr.push_back({sColorWheel[i].r, sColorWheel[i].g, sColorWheel[i].b});
+        }
+        return arr;
+    });
+
+    AI::registerTool("select_color_slot", [require3dModeler](const AI::Json& a) -> AI::Json {
+        require3dModeler();
+        int slot = a.at("slot").get<int>();
+        if (slot < 0 || slot >= 16) throw std::runtime_error("slot must be 0..15");
+        sSelectedColor = slot;
+        return AI::Json{{"selected", slot}};
+    });
+
+    // ---- Context tools (only exposed to the model when the user clicks
+    //      "Send + Info"; always registered, gating happens in agent.py) ----
+    AI::registerTool("get_camera_position", [require3dModeler](const AI::Json&) -> AI::Json {
+        require3dModeler();
+        Camera* cam = getGlobalCamera();
+        return AI::Json{
+            {"x", cam->position.x}, {"y", cam->position.y}, {"z", cam->position.z},
+            {"yaw", cam->yaw}, {"pitch", cam->pitch}
+        };
+    });
+
+    AI::registerTool("get_camera_forward", [require3dModeler](const AI::Json&) -> AI::Json {
+        require3dModeler();
+        Camera* cam = getGlobalCamera();
+        float yawRad = glm::radians(cam->yaw);
+        float pitchRad = glm::radians(cam->pitch);
+        glm::vec3 d(
+            std::cos(pitchRad) * std::sin(yawRad),
+            std::sin(pitchRad),
+            std::cos(pitchRad) * std::cos(yawRad)
+        );
+        return AI::Json{{"x", d.x}, {"y", d.y}, {"z", d.z}};
+    });
+
+    AI::registerTool("list_blocks", [require3dModeler](const AI::Json&) -> AI::Json {
+        require3dModeler();
+        AI::Json arr = AI::Json::array();
+        for (const auto& col : getAllColliders()) {
+            if (col.meshName == "_ghost") continue;
+            arr.push_back({
+                {"x", (int)std::round(col.position.x)},
+                {"y", (int)std::round(col.position.y)},
+                {"z", (int)std::round(col.position.z)},
+                {"mesh", col.meshName}
+            });
+        }
+        return arr;
+    });
+
+    AI::registerTool("get_aimed_block", [require3dModeler](const AI::Json& a) -> AI::Json {
+        require3dModeler();
+        Camera* cam = getGlobalCamera();
+        float yawRad = glm::radians(cam->yaw);
+        float pitchRad = glm::radians(cam->pitch);
+        glm::vec3 dir(
+            std::cos(pitchRad) * std::sin(yawRad),
+            std::sin(pitchRad),
+            std::cos(pitchRad) * std::cos(yawRad)
+        );
+        float maxDist = a.value("max_distance", 50.0f);
+
+        const auto& cols = getAllColliders();
+        float bestT = std::numeric_limits<float>::max();
+        int bestFace = -1;
+        glm::vec3 bestPos(0.0f);
+        bool found = false;
+
+        for (const auto& col : cols) {
+            if (col.meshName == "_ghost") continue;
+            glm::vec3 mn = col.position - glm::vec3(0.5f);
+            glm::vec3 mx = col.position + glm::vec3(0.5f);
+            // Slab test: find tEnter and which face the ray entered through.
+            float tmin = -std::numeric_limits<float>::infinity();
+            float tmax =  std::numeric_limits<float>::infinity();
+            int enterFace = -1;
+            bool valid = true;
+            for (int axis = 0; axis < 3; axis++) {
+                if (std::fabs(dir[axis]) < 1e-8f) {
+                    if (cam->position[axis] < mn[axis] || cam->position[axis] > mx[axis]) {
+                        valid = false; break;
+                    }
+                    continue;
+                }
+                float invD = 1.0f / dir[axis];
+                float t1 = (mn[axis] - cam->position[axis]) * invD;
+                float t2 = (mx[axis] - cam->position[axis]) * invD;
+                int f1 = axis * 2 + 1;  // -X / -Y / -Z (entered from negative side)
+                int f2 = axis * 2;      // +X / +Y / +Z
+                if (t1 > t2) { std::swap(t1, t2); std::swap(f1, f2); }
+                if (t1 > tmin) { tmin = t1; enterFace = f1; }
+                if (t2 < tmax) tmax = t2;
+                if (tmin > tmax) { valid = false; break; }
+            }
+            if (!valid) continue;
+            if (tmin < 0.0f || tmin > maxDist) continue;
+            if (tmin < bestT) {
+                bestT = tmin;
+                bestFace = enterFace;
+                bestPos = col.position;
+                found = true;
+            }
+        }
+
+        if (!found) return AI::Json{{"hit", false}};
+        return AI::Json{
+            {"hit", true},
+            {"x", (int)std::round(bestPos.x)},
+            {"y", (int)std::round(bestPos.y)},
+            {"z", (int)std::round(bestPos.z)},
+            {"face", bestFace},
+            {"distance", bestT}
+        };
+    });
+
+    AI::registerTool("edit_slot", [require3dModeler](const AI::Json& a) -> AI::Json {
+        require3dModeler();
+        int slot = a.at("slot").get<int>();
+        if (slot < 0 || slot >= (int)sSlotMesh.size())
+            throw std::runtime_error("slot out of range [0.." +
+                std::to_string((int)sSlotMesh.size() - 1) + "]");
+        const std::string& cur = sSlotMesh[slot];
+        if (!cur.empty()) {
+            const RegisteredMesh* reg = getRegisteredMesh(cur.c_str());
+            if (reg && reg->isPrefab)
+                throw std::runtime_error("slot '" + cur + "' is a built-in prefab and cannot be edited");
+        }
+        saveCurrentModel();
+        sSelectedSlot = slot;
+        std::string meshName = cur.empty() ? ("slot_" + std::to_string(slot)) : cur;
+        sPendingSlotUpdate = slot;
+        sPendingSlotMesh = meshName;
+        auto* editData = new VectorMeshEditData{meshName, slot, sModelName};
+        VE::setScene("vectorMesh", editData);
+        return AI::Json{{"slot", slot}, {"mesh_name", meshName}};
+    });
 }

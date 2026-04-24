@@ -7,13 +7,17 @@
 #include "../../../VisualEngine/uiManagement/UIPrefabs.h"
 #include "../../../VisualEngine/uiManagement/TextRenderer.h"
 #include "../../../VisualEngine/uiManagement/EmbeddedFont.h"
+#include "../mechanics/AiHandling/AiHandling.h"
+#include <cstdlib>
 #include <filesystem>
+#include <fstream>
 
 static bool sLoadView = false;
 
 static void showMainMenu();
 static void showLoadMenu();
 static void showFileList(const std::string& type);
+static void showSetKeyMenu();
 
 static const float BTN_W = 0.4f;
 static const float BTN_H = 0.08f;
@@ -43,11 +47,85 @@ static void showMainMenu() {
     ));
     y -= GAP;
 
+    // AI toggle — placed right above Exit. Rebuilds the menu on click so the
+    // label reflects the new state.
+    addToGroup("menu_buttons", createButton("ai_toggle",
+        BTN_X, y, BTN_W, BTN_H,
+        {0.2f, 0.25f, 0.35f, 0.9f},
+        AI::isEnabled() ? "AI: ON" : "AI: OFF",
+        []() {
+            AI::setEnabled(!AI::isEnabled());
+            showMainMenu();
+        }
+    ));
+    y -= GAP;
+
+    addToGroup("menu_buttons", createButton("set_api_key",
+        BTN_X, y, BTN_W, BTN_H,
+        {0.2f, 0.25f, 0.35f, 0.9f},
+        "Set API Key",
+        []() { showSetKeyMenu(); }
+    ));
+    y -= GAP;
+
     addToGroup("menu_buttons", createButton("exit",
         BTN_X, y, BTN_W, BTN_H,
         {0.3f, 0.1f, 0.1f, 0.9f},
         "Exit",
         []() { glfwSetWindowShouldClose(ctx.window, true); }
+    ));
+}
+
+static void showSetKeyMenu() {
+    removeUIGroup("menu_buttons");
+    addUIGroup("menu_buttons");
+
+    float y = START_Y;
+
+    UIElement keyInput = createTextInput("key_input",
+        BTN_X, y, BTN_W, BTN_H,
+        {0.18f, 0.18f, 0.22f, 0.95f},
+        "Paste Gemini API key...", 200);
+    addToGroup("menu_buttons", keyInput);
+    y -= GAP;
+
+    addToGroup("menu_buttons", createButton("key_save",
+        BTN_X, y, BTN_W, BTN_H,
+        {0.2f, 0.35f, 0.2f, 0.9f},
+        "Save",
+        []() {
+            std::string key = getInputText("menu_buttons", "key_input");
+            // Trim trailing whitespace / newlines from a pasted value.
+            while (!key.empty() && (key.back() == '\n' || key.back() == '\r'
+                                    || key.back() == ' ' || key.back() == '\t'))
+                key.pop_back();
+            if (key.empty()) return;
+
+            std::ofstream out(".gemini_key", std::ios::trunc);
+            if (out) out << key;
+            out.close();
+
+            // Apply to the current process so a restart isn't required.
+#ifdef _WIN32
+            _putenv_s("GEMINI_API_KEY", key.c_str());
+#else
+            setenv("GEMINI_API_KEY", key.c_str(), 1);
+#endif
+            // Restart the sidecar if AI is on so it picks up the new key.
+            if (AI::isEnabled()) {
+                AI::shutdown();
+                AI::init();
+            }
+            showMainMenu();
+        }
+    ));
+    y -= GAP;
+
+    addToGroup("menu_buttons", createButton("key_back",
+        BTN_X, y, BTN_W, BTN_H,
+        {0.3f, 0.1f, 0.1f, 0.9f},
+        "Back",
+        []() { showMainMenu(); }
     ));
 }
 

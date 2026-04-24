@@ -98,14 +98,19 @@ static bool isPositiveFace(int faceDir) {
 struct GMPlaneKey {
     int faceDir;
     int planeIntCoord; // 2 * world_coord_along_normal + (positive ? 1 : -1)
+    const RegisteredMesh* mesh; // disambiguates different rectangular types
     bool operator==(const GMPlaneKey& o) const {
-        return faceDir == o.faceDir && planeIntCoord == o.planeIntCoord;
+        return faceDir == o.faceDir
+            && planeIntCoord == o.planeIntCoord
+            && mesh == o.mesh;
     }
 };
 struct GMPlaneKeyHash {
     size_t operator()(const GMPlaneKey& k) const {
-        return std::hash<int>()(k.faceDir)
-             ^ (std::hash<int>()(k.planeIntCoord) << 8);
+        size_t h = std::hash<int>()(k.faceDir);
+        h ^= std::hash<int>()(k.planeIntCoord) + 0x9e3779b9 + (h << 6) + (h >> 2);
+        h ^= std::hash<const void*>()(k.mesh)  + 0x9e3779b9 + (h << 6) + (h >> 2);
+        return h;
     }
 };
 
@@ -257,8 +262,11 @@ bool exportModelToGlb(const std::string& outPath) {
 
     VertexColorPrim prim;
 
+    // Palette is fixed at 16 entries (see setPaintPalette). Guard both ends
+    // so a corrupt triColors entry or a stray non-rectangular triangle index
+    // can't walk past the buffer.
     auto colorForIndex = [&](int paletteIndex) -> glm::vec3 {
-        if (paletteIndex < 0) return kUnpaintedColor;
+        if (!palette || paletteIndex < 0 || paletteIndex >= 16) return kUnpaintedColor;
         return palette[paletteIndex];
     };
 
@@ -266,26 +274,109 @@ bool exportModelToGlb(const std::string& outPath) {
     int emittedTris = 0;
     int greedyQuads = 0;
 
-    // A collider is greedy-meshable if: rectangular, 90-aligned rotation,
-    // and on integer grid coordinates. Everything else (wedges, custom
-    // vectorMesh shapes, rotated cubes, off-grid placements) goes through
-    // the per-triangle path below.
-    auto isGreedyMeshable = [&](const BlockCollider& col,
-                                const RegisteredMesh* reg,
-                                const glm::ivec3& ipos,
-                                int rotMap[6]) -> bool {
-        if (!reg->rectangular) return false;
-        if (!buildFaceRotMap(col.rotation, rotMap)) return false;
-        if (std::fabs(col.position.x - ipos.x) > 0.01f ||
-            std::fabs(col.position.y - ipos.y) > 0.01f ||
-            std::fabs(col.position.z - ipos.z) > 0.01f) return false;
-        return true;
+    // Greedy meshing hardcodes ±0.5 cell extents, so we need to verify the
+    // mesh lives inside a 1x1x1 reference cube. We only require the AABB to
+    // *fit inside* [-0.5, 0.5] on every axis — not to span it. That way a
+    // vectorMesh that's just one flat face (e.g. a +Z quad where every vert
+    // has z=0.5) still qualifies; faceCacheFor re-verifies each face sits at
+    // exactly ±0.5 before admitting it to greedy, so there's no cell overlap
+    // with neighbors. Cached per-mesh.
+    std::unordered_map<const RegisteredMesh*, bool> fitsUnitCubeCache;
+    auto fitsUnitCube = [&](const RegisteredMesh* reg) -> bool {
+        auto it = fitsUnitCubeCache.find(reg);
+        if (it != fitsUnitCubeCache.end()) return it->second;
+        int fpv = reg->floatsPerVertex;
+        const float eps = 0.01f;
+        bool fits = true;
+        for (int i = 0; i < reg->vertexCount && fits; i++) {
+            float x = reg->vertices[i * fpv + 0];
+            float y = reg->vertices[i * fpv + 1];
+            float z = reg->vertices[i * fpv + 2];
+            if (x < -0.5f - eps || x > 0.5f + eps ||
+                y < -0.5f - eps || y > 0.5f + eps ||
+                z < -0.5f - eps || z > 0.5f + eps) fits = false;
+        }
+        fitsUnitCubeCache[reg] = fits;
+        return fits;
     };
 
-    // ── PHASE 1: Collect face cells from greedy-meshable colliders ──
-    std::unordered_map<GMPlaneKey, std::vector<GMCell>, GMPlaneKeyHash> planeGrids;
+    // Per-mesh, per-local-face eligibility for greedy meshing.
+    //   rectangular meshes: all 6 faces eligible by construction (24 verts on
+    //     the AABB, triColors[f] gives the face color).
+    //   vectorMesh meshes: a face is eligible only if its tagged triangles
+    //     (triFaceDir == f) strictly tile the 1x1 square at ±0.5. faceState==2
+    //     alone is insufficient — it's an area heuristic that tolerates small
+    //     gaps/overhang, which would cause greedy to paint surface the source
+    //     didn't have. So we re-verify: every face-tri vert must sit on the
+    //     ±0.5 plane AND inside the unit face bounds, and the summed projected
+    //     area must fill the square.
+    struct MeshFaceCache {
+        bool eligible[6] = {false, false, false, false, false, false};
+        std::vector<int> faceTris[6]; // local tri indices per face (vectorMesh only)
+    };
+    std::unordered_map<const RegisteredMesh*, MeshFaceCache> meshFaceCache;
+    auto faceCacheFor = [&](const RegisteredMesh* reg) -> const MeshFaceCache& {
+        auto it = meshFaceCache.find(reg);
+        if (it != meshFaceCache.end()) return it->second;
+        MeshFaceCache mc;
+        if (reg->rectangular) {
+            for (int i = 0; i < 6; i++) mc.eligible[i] = true;
+        } else {
+            int fpv = reg->floatsPerVertex;
+            int triCount = reg->indexCount / 3;
+            const float eps = 0.01f;
+            for (int f = 0; f < 6; f++) {
+                if (reg->faceState[f] != 2) continue; // not solid per editor heuristic
+                const FaceAxes& axes = kFaceAxes[f];
+                float expectedN = isPositiveFace(f) ? 0.5f : -0.5f;
+                bool ok = true;
+                float area = 0.0f;
+                std::vector<int> tris;
+                for (int t = 0; t < triCount && ok; t++) {
+                    int fd = (t < (int)reg->triFaceDir.size()) ? reg->triFaceDir[t] : -1;
+                    if (fd != f) continue;
+                    uint32_t i0 = reg->indices[t * 3];
+                    uint32_t i1 = reg->indices[t * 3 + 1];
+                    uint32_t i2 = reg->indices[t * 3 + 2];
+                    glm::vec3 verts[3] = {
+                        {reg->vertices[i0 * fpv], reg->vertices[i0 * fpv + 1], reg->vertices[i0 * fpv + 2]},
+                        {reg->vertices[i1 * fpv], reg->vertices[i1 * fpv + 1], reg->vertices[i1 * fpv + 2]},
+                        {reg->vertices[i2 * fpv], reg->vertices[i2 * fpv + 1], reg->vertices[i2 * fpv + 2]},
+                    };
+                    for (int k = 0; k < 3; k++) {
+                        if (std::fabs(verts[k][axes.normalAxis] - expectedN) > eps) { ok = false; break; }
+                        float uu = verts[k][axes.uAxis], vv = verts[k][axes.vAxis];
+                        if (uu < -0.5f - eps || uu > 0.5f + eps) { ok = false; break; }
+                        if (vv < -0.5f - eps || vv > 0.5f + eps) { ok = false; break; }
+                    }
+                    if (!ok) break;
+                    float u0 = verts[0][axes.uAxis], u1 = verts[1][axes.uAxis], u2 = verts[2][axes.uAxis];
+                    float w0 = verts[0][axes.vAxis], w1 = verts[1][axes.vAxis], w2 = verts[2][axes.vAxis];
+                    area += 0.5f * std::fabs((u1 - u0) * (w2 - w0) - (u2 - u0) * (w1 - w0));
+                    tris.push_back(t);
+                }
+                // Require full unit coverage (area >= 1.0). Overlapping tris that
+                // sum past 1.0 are harmless — the merged quad covers the same
+                // visible surface. Gaps (area < 1.0) would paint extra surface.
+                if (ok && !tris.empty() && area >= 1.0f - eps) {
+                    mc.eligible[f] = true;
+                    mc.faceTris[f] = std::move(tris);
+                }
+            }
+        }
+        return meshFaceCache.emplace(reg, std::move(mc)).first->second;
+    };
 
-    for (const auto& col : colliders) {
+    // ── PHASE 1: Collect face cells from greedy-eligible faces ──
+    // Collider-level gate: unit-cube extents, 90-aligned rotation, integer
+    // grid position. Within an eligible collider, each local face admits
+    // independently — vectorMesh cubes with some multi-color or slanted
+    // faces still get partial greedy merging.
+    std::unordered_map<GMPlaneKey, std::vector<GMCell>, GMPlaneKeyHash> planeGrids;
+    std::vector<std::vector<bool>> triConsumed(colliders.size());
+
+    for (size_t ci = 0; ci < colliders.size(); ci++) {
+        const auto& col = colliders[ci];
         if (col.meshName == "_ghost") continue;
         const RegisteredMesh* reg = getRegisteredMesh(col.meshName.c_str());
         if (!reg) continue;
@@ -294,22 +385,62 @@ bool exportModelToGlb(const std::string& outPath) {
                         (int)roundf(col.position.y),
                         (int)roundf(col.position.z));
         int rotMap[6];
-        if (!isGreedyMeshable(col, reg, ipos, rotMap)) continue;
+        if (!fitsUnitCube(reg)) continue;
+        if (!buildFaceRotMap(col.rotation, rotMap)) continue;
+        if (std::fabs(col.position.x - ipos.x) > 0.01f ||
+            std::fabs(col.position.y - ipos.y) > 0.01f ||
+            std::fabs(col.position.z - ipos.z) > 0.01f) continue;
+
+        const MeshFaceCache& mc = faceCacheFor(reg);
+        int triCount = reg->indexCount / 3;
+        triConsumed[ci].assign(triCount, false);
 
         for (int f = 0; f < 6; f++) {
-            int worldFd = rotMap[f];
-            if (cullSet.count({ipos, worldFd})) {
-                culledTris += 2; // would have been 2 tris per face
-                continue;
-            }
-            int paletteIndex = -1;
-            if (f < (int)col.triColors.size())
-                paletteIndex = col.triColors[f];
+            if (!mc.eligible[f]) continue;
 
-            GMPlaneKey key{worldFd, planeIntCoordFor(worldFd, ipos)};
-            int u = ipos[kFaceAxes[worldFd].uAxis];
-            int v = ipos[kFaceAxes[worldFd].vAxis];
-            planeGrids[key].push_back({u, v, paletteIndex});
+            // Resolve a single palette index for this face.
+            int paletteIndex = -1;
+            if (reg->rectangular) {
+                if (f < (int)col.triColors.size())
+                    paletteIndex = col.triColors[f];
+            } else {
+                // All face-tris must share a color; otherwise the face can't
+                // collapse to one quad and falls through to phase 3.
+                bool hasColor = false;
+                bool conflict = false;
+                int shared = -1;
+                for (int t : mc.faceTris[f]) {
+                    int c = (t < (int)col.triColors.size()) ? col.triColors[t] : -1;
+                    if (!hasColor) { shared = c; hasColor = true; }
+                    else if (c != shared) { conflict = true; break; }
+                }
+                if (conflict) continue;
+                paletteIndex = shared;
+            }
+
+            int worldFd = rotMap[f];
+            int faceTriCount = reg->rectangular ? 2 : (int)mc.faceTris[f].size();
+            if (cullSet.count({ipos, worldFd})) {
+                culledTris += faceTriCount;
+            } else {
+                GMPlaneKey key{worldFd, planeIntCoordFor(worldFd, ipos), reg};
+                int u = ipos[kFaceAxes[worldFd].uAxis];
+                int v = ipos[kFaceAxes[worldFd].vAxis];
+                planeGrids[key].push_back({u, v, paletteIndex});
+            }
+
+            // Mark consumed either way — phase 3 must not re-emit these tris.
+            if (!reg->rectangular) {
+                for (int t : mc.faceTris[f]) triConsumed[ci][t] = true;
+            }
+        }
+
+        // Rectangular prefabs from registerMesh don't populate triFaceDir, so
+        // we can't map tris-to-faces per-tri. But all 12 tris belong to some
+        // face, all 6 faces are eligible, all were either emitted or culled —
+        // so it's safe to mark the entire collider consumed.
+        if (reg->rectangular) {
+            for (int t = 0; t < triCount; t++) triConsumed[ci][t] = true;
         }
     }
 
@@ -321,9 +452,11 @@ bool exportModelToGlb(const std::string& outPath) {
         emittedTris += q * 2;
     }
 
-    // ── PHASE 3: Per-triangle emit for non-greedy-meshable colliders ──
-    // (wedges, custom vectorMesh shapes, rotated/off-grid cubes)
-    for (const auto& col : colliders) {
+    // ── PHASE 3: Per-triangle emit for everything greedy didn't consume ──
+    // (wedges, slanted vectorMesh interiors, multi-color faces, rotated/off-grid
+    // cubes, non-unit rectangular meshes)
+    for (size_t ci = 0; ci < colliders.size(); ci++) {
+        const auto& col = colliders[ci];
         if (col.meshName == "_ghost") continue;
         const RegisteredMesh* reg = getRegisteredMesh(col.meshName.c_str());
         if (!reg) continue;
@@ -334,12 +467,12 @@ bool exportModelToGlb(const std::string& outPath) {
         glm::ivec3 ipos((int)roundf(pos.x), (int)roundf(pos.y), (int)roundf(pos.z));
 
         int rotMap[6];
-        if (isGreedyMeshable(col, reg, ipos, rotMap)) continue; // handled above
-
         bool is90 = buildFaceRotMap(rot, rotMap);
+        const auto& consumed = triConsumed[ci]; // empty if collider skipped phase 1
 
         int triCount = reg->indexCount / 3;
         for (int t = 0; t < triCount; t++) {
+            if (t < (int)consumed.size() && consumed[t]) continue;
             uint32_t i0 = reg->indices[t * 3];
             uint32_t i1 = reg->indices[t * 3 + 1];
             uint32_t i2 = reg->indices[t * 3 + 2];

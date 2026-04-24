@@ -15,11 +15,19 @@
 #include "SceneData.h"
 #include "../../../VisualEngine/renderingManagement/meshing/ChunkMesh.h"
 #include "../../../VisualEngine/memoryManagement/memory.h"
+#include "../mechanics/AiHandling/AiHandling.h"
+#include "../mechanics/AiHandling/AiTools.h"
+#include "../../../VisualEngine/sceneManagement/SceneManager.h"
 #include <vector>
 #include <string>
 #include <cmath>
 #include <fstream>
 #include <iostream>
+#include <unordered_map>
+#include <unordered_set>
+#include <numeric>
+#include <algorithm>
+#include <random>
 
 // 8 corners of a unit cube centered at origin
 static const glm::vec3 cubeVerts[8] = {
@@ -72,7 +80,7 @@ static int sReturnSlot = -1;
 static std::string sReturnModelName;
 static bool sVMeshPaused = false;
 static bool sVMeshWasEscDown = false;
-static bool sVMeshWasCtrlTabDown = false;
+static bool sVMeshWasSpaceDown = false;
 static bool sVMeshWasCtrlZDown = false;
 
 // Undo system: snapshot of all placed geometry
@@ -493,6 +501,99 @@ static void rebuildModeTools() {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Helpers shared between AI tools (af / fn / build).
+// ---------------------------------------------------------------------------
+
+// Groups triangles into connected components (shared-edge flood fill),
+// orients each triangle's normal outward from its component's vertex centroid,
+// and reports whether every component was airtight (every edge shared by
+// exactly 2 triangles).
+static bool aiAutoFixNormals() {
+    auto edgeKey = [](int u, int v) -> uint64_t {
+        if (u > v) std::swap(u, v);
+        return ((uint64_t)(uint32_t)u << 32) | (uint32_t)v;
+    };
+    const int triCount = (int)sPlacedTriangles.size();
+    if (triCount == 0) return true;
+
+    std::vector<int> parent(triCount);
+    std::iota(parent.begin(), parent.end(), 0);
+    auto find = [&](int x) {
+        while (parent[x] != x) { parent[x] = parent[parent[x]]; x = parent[x]; }
+        return x;
+    };
+    auto unite = [&](int a, int b) {
+        int ra = find(a), rb = find(b);
+        if (ra != rb) parent[ra] = rb;
+    };
+
+    std::unordered_map<uint64_t, std::vector<int>> edgeToTris;
+    for (int i = 0; i < triCount; i++) {
+        const auto& t = sPlacedTriangles[i];
+        edgeToTris[edgeKey(t.dotA, t.dotB)].push_back(i);
+        edgeToTris[edgeKey(t.dotB, t.dotC)].push_back(i);
+        edgeToTris[edgeKey(t.dotC, t.dotA)].push_back(i);
+    }
+    for (auto& kv : edgeToTris) {
+        const auto& tris = kv.second;
+        for (size_t k = 1; k < tris.size(); k++) unite(tris[0], tris[k]);
+    }
+
+    std::unordered_map<int, std::vector<int>> components;
+    for (int i = 0; i < triCount; i++) components[find(i)].push_back(i);
+
+    bool allAirtight = true;
+    for (auto& kv : components) {
+        const auto& tris = kv.second;
+        std::unordered_set<int> vertSet;
+        for (int ti : tris) {
+            const auto& t = sPlacedTriangles[ti];
+            vertSet.insert(t.dotA); vertSet.insert(t.dotB); vertSet.insert(t.dotC);
+        }
+        glm::vec3 centroid(0.0f);
+        for (int vi : vertSet) centroid += sPlacedDots[vi];
+        if (!vertSet.empty()) centroid /= (float)vertSet.size();
+
+        std::unordered_map<uint64_t, int> localEdges;
+        for (int ti : tris) {
+            const auto& t = sPlacedTriangles[ti];
+            localEdges[edgeKey(t.dotA, t.dotB)]++;
+            localEdges[edgeKey(t.dotB, t.dotC)]++;
+            localEdges[edgeKey(t.dotC, t.dotA)]++;
+        }
+        for (auto& ek : localEdges)
+            if (ek.second != 2) { allAirtight = false; break; }
+
+        for (int ti : tris) {
+            const auto& t = sPlacedTriangles[ti];
+            glm::vec3 A = sPlacedDots[t.dotA];
+            glm::vec3 B = sPlacedDots[t.dotB];
+            glm::vec3 C = sPlacedDots[t.dotC];
+            glm::vec3 n = glm::cross(C - A, B - A);
+            if (t.flipped) n = -n;
+            glm::vec3 triCentroid = (A + B + C) / 3.0f;
+            if (glm::dot(n, triCentroid - centroid) < 0.0f)
+                sPlacedTriangles[ti].flipped = !sPlacedTriangles[ti].flipped;
+        }
+    }
+    return allAirtight;
+}
+
+// Saves and exports the current vmesh, then transitions back to 3dModeler
+// (or menu if there is no return context). Mirrors the space-release flow.
+static void aiFinishVMeshEdit() {
+    saveVectorMesh();
+    exportVMeshToMesh();
+    sVMeshPaused = false;
+    VE::setBrightness(1.0f);
+    removeUIGroup("vmesh_pause");
+    if (!sReturnModelName.empty())
+        VE::setScene("3dModeler", new std::string(sReturnModelName));
+    else
+        VE::setScene("menu");
+}
+
 static int getSnapCount() {
     std::string val = getInputText("mode_tools", "snap_input");
     if (val.empty()) return 0;
@@ -566,6 +667,66 @@ void registerVectorMeshScene() {
                 },
                 0.0f, -SIDE_GAP
             );
+
+            // Left-side AI panel (mirror of 3dModeler's layout).
+            if (AI::isEnabled()) {
+                float aiPanelX = -1.0f;
+                float aiPanelW = 0.4f;
+                float aiPad = 0.02f;
+                float aiBtnW = aiPanelW - aiPad * 2;
+                float aiBtnX = aiPanelX + aiPad;
+                float aiBtnH = 0.06f;
+
+                addUIGroup("ai_panel");
+                addToGroup("ai_panel", createPanel("ai_bg",
+                    aiPanelX, -1.0f, aiPanelW, 2.0f,
+                    {0.12f, 0.12f, 0.12f, 0.85f}
+                ));
+
+                const float aiRespBottom = 0.50f;
+                const float aiRespHeight = 0.45f;
+                const int   aiRespLines  = 8;
+                const float aiLineH = aiRespHeight / aiRespLines;
+
+                addToGroup("ai_panel", createPanel("ai_response",
+                    aiBtnX, aiRespBottom, aiBtnW, aiRespHeight,
+                    {0.16f, 0.16f, 0.20f, 0.85f}
+                ));
+                for (int i = 0; i < aiRespLines; i++) {
+                    UIElement line = createPanel(
+                        "ai_line_" + std::to_string(i),
+                        aiBtnX,
+                        aiRespBottom + aiRespHeight - (i + 1) * aiLineH,
+                        aiBtnW, aiLineH,
+                        {0.0f, 0.0f, 0.0f, 0.0f}
+                    );
+                    line.labelScale = 0.25f;
+                    line.labelColor = {0.88f, 0.88f, 0.88f, 1.0f};
+                    line.label = (i == 0) ? "Ready" : "";
+                    addToGroup("ai_panel", line);
+                }
+
+                UIElement promptEl = createTextInput("ai_prompt",
+                    aiBtnX, 0.42f, aiBtnW, aiBtnH,
+                    {0.18f, 0.18f, 0.22f, 0.95f},
+                    "Ask AI...", 200);
+                // Intentionally no onUnfocus: clicking away just unfocuses.
+                // Submission happens only via the Send button.
+                promptEl.multiline = true;
+                addToGroup("ai_panel", promptEl);
+
+                addToGroup("ai_panel", createButton("ai_send",
+                    aiBtnX, 0.34f, aiBtnW, aiBtnH,
+                    {0.25f, 0.40f, 0.60f, 0.95f}, "Send",
+                    []() {
+                        std::string text = getInputText("ai_panel", "ai_prompt");
+                        if (text.empty()) return;
+                        AI::submitPrompt(text);
+                        if (auto* in = getUIElement("ai_panel", "ai_prompt"))
+                            in->inputText.clear();
+                    }
+                ));
+            }
         },
         // onExit
         []() {
@@ -580,6 +741,67 @@ void registerVectorMeshScene() {
         },
         // onInput
         [](float dt) {
+            AI::update(dt);
+
+            // Grow the AI prompt vertically to fit its current text; reposition
+            // Send below it. Top edge stays anchored at 0.48.
+            if (auto* input = getUIElement("ai_panel", "ai_prompt")) {
+                const float kBaseH = 0.06f;
+                const float kLineGrow = 0.05f;
+                const float kTopEdge = 0.48f;
+                int lines = inputWrappedLineCount(*input);
+                float newH = kBaseH + kLineGrow * (float)std::max(0, lines - 1);
+                input->size.y = newH;
+                input->position.y = kTopEdge - newH;
+                if (auto* send = getUIElement("ai_panel", "ai_send")) {
+                    send->position.y = input->position.y - 0.02f - 0.06f;
+                }
+            }
+
+            // Mirror AI status/response into the left panel's 8-row text area,
+            // word-wrapping to fit the panel width.
+            {
+                std::string response = AI::getLastResponse();
+                std::string display = !response.empty() ? response : AI::getStatus();
+
+                const size_t kCharsPerLine = 26;
+                const int kRows = 8;
+                std::vector<std::string> lines;
+                std::string cur, word;
+                auto flushWord = [&]() {
+                    if (word.empty()) return;
+                    if (cur.empty()) cur = word;
+                    else if (cur.size() + 1 + word.size() <= kCharsPerLine) cur += " " + word;
+                    else { lines.push_back(cur); cur = word; }
+                    word.clear();
+                };
+                for (char c : display) {
+                    if (c == '\n') { flushWord(); if (!cur.empty()) { lines.push_back(cur); cur.clear(); } }
+                    else if (c == ' ' || c == '\t') { flushWord(); }
+                    else {
+                        word += c;
+                        if (word.size() > kCharsPerLine) {
+                            if (!cur.empty()) { lines.push_back(cur); cur.clear(); }
+                            lines.push_back(word.substr(0, kCharsPerLine));
+                            word = word.substr(kCharsPerLine);
+                        }
+                    }
+                }
+                flushWord();
+                if (!cur.empty()) lines.push_back(cur);
+                if ((int)lines.size() > kRows) {
+                    lines.resize(kRows);
+                    std::string& last = lines.back();
+                    if (last.size() > kCharsPerLine - 3) last.resize(kCharsPerLine - 3);
+                    last += "...";
+                }
+                for (int i = 0; i < kRows; i++) {
+                    std::string id = "ai_line_" + std::to_string(i);
+                    if (auto* el = getUIElement("ai_panel", id))
+                        el->label = (i < (int)lines.size()) ? lines[i] : "";
+                }
+            }
+
             // Esc toggle pause menu
             bool escDown = glfwGetKey(ctx.window, GLFW_KEY_ESCAPE) == GLFW_PRESS;
             if (escDown && !sVMeshWasEscDown) {
@@ -593,12 +815,14 @@ void registerVectorMeshScene() {
             }
             sVMeshWasEscDown = escDown;
 
-            // Ctrl+Tab: save and exit back to 3dModeler - fires on release
-            bool ctrlHeld = glfwGetKey(ctx.window, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS;
-            bool tabDown = glfwGetKey(ctx.window, GLFW_KEY_TAB) == GLFW_PRESS;
-            bool ctrlTab = ctrlHeld && tabDown;
-            if (!ctrlTab && sVMeshWasCtrlTabDown) {
-                sVMeshWasCtrlTabDown = false;
+            // Space: save and exit back to 3dModeler - fires on release.
+            // Ignored while in camera movement mode so space can be used for jump/up.
+            Camera* spaceCam = getGlobalCamera();
+            bool spaceInMovement = spaceCam && spaceCam->looking;
+            bool spaceDown = !spaceInMovement && !isAnyInputFocused()
+                             && glfwGetKey(ctx.window, GLFW_KEY_SPACE) == GLFW_PRESS;
+            if (!spaceDown && sVMeshWasSpaceDown) {
+                sVMeshWasSpaceDown = false;
                 saveVectorMesh();
                 exportVMeshToMesh();
                 sVMeshPaused = false;
@@ -610,9 +834,10 @@ void registerVectorMeshScene() {
                     VE::setScene("menu");
                 return;
             }
-            sVMeshWasCtrlTabDown = ctrlTab;
+            sVMeshWasSpaceDown = spaceDown;
 
             // Ctrl+Z: undo
+            bool ctrlHeld = glfwGetKey(ctx.window, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS;
             bool zDown = glfwGetKey(ctx.window, GLFW_KEY_Z) == GLFW_PRESS;
             bool ctrlZ = ctrlHeld && zDown;
             if (ctrlZ && !sVMeshWasCtrlZDown) {
@@ -975,4 +1200,389 @@ void registerVectorMeshScene() {
             renderUI();
         }
     );
+
+    // ---- AI tools ----------------------------------------------------------
+    auto requireVMesh = []() {
+        if (getActiveSceneName() != "vectorMesh")
+            throw std::runtime_error("tool requires the vectorMesh scene to be active");
+    };
+
+    AI::registerTool("vmesh_add_vertices", [requireVMesh](const AI::Json& a) -> AI::Json {
+        requireVMesh();
+        if (!a.contains("vertices") || !a["vertices"].is_array())
+            throw std::runtime_error("vertices must be an array of [x,y,z] triples");
+        const auto& verts = a["vertices"];
+        if (verts.empty()) throw std::runtime_error("vertices array is empty");
+        // Validate all first so failures don't leave partial mutations.
+        for (size_t i = 0; i < verts.size(); i++) {
+            if (!verts[i].is_array() || verts[i].size() != 3)
+                throw std::runtime_error("vertex " + std::to_string(i) + " must be [x,y,z]");
+        }
+        pushVMeshUndo();
+        AI::Json indices = AI::Json::array();
+        for (const auto& v : verts) {
+            sPlacedDots.emplace_back(
+                v[0].get<float>(), v[1].get<float>(), v[2].get<float>());
+            indices.push_back((int)sPlacedDots.size() - 1);
+        }
+        return AI::Json{{"indices", indices}};
+    });
+
+    AI::registerTool("vmesh_add_triangles", [requireVMesh](const AI::Json& a) -> AI::Json {
+        requireVMesh();
+        if (!a.contains("triangles") || !a["triangles"].is_array())
+            throw std::runtime_error("triangles must be an array of {a,b,c[,flipped]} objects");
+        const auto& tris = a["triangles"];
+        if (tris.empty()) throw std::runtime_error("triangles array is empty");
+        const int n = (int)sPlacedDots.size();
+        for (size_t i = 0; i < tris.size(); i++) {
+            const auto& t = tris[i];
+            int ai = t.at("a").get<int>();
+            int bi = t.at("b").get<int>();
+            int ci = t.at("c").get<int>();
+            if (ai < 0 || ai >= n || bi < 0 || bi >= n || ci < 0 || ci >= n)
+                throw std::runtime_error("triangle " + std::to_string(i) + " has vertex index out of range");
+            if (ai == bi || bi == ci || ai == ci)
+                throw std::runtime_error("triangle " + std::to_string(i) + " vertices must be distinct");
+        }
+        pushVMeshUndo();
+        AI::Json indices = AI::Json::array();
+        for (const auto& t : tris) {
+            PlacedTriangle pt;
+            pt.dotA = t.at("a").get<int>();
+            pt.dotB = t.at("b").get<int>();
+            pt.dotC = t.at("c").get<int>();
+            pt.flipped = t.value("flipped", false);
+            sPlacedTriangles.push_back(pt);
+            indices.push_back((int)sPlacedTriangles.size() - 1);
+        }
+        return AI::Json{{"indices", indices}};
+    });
+
+    AI::registerTool("vmesh_delete_triangles", [requireVMesh](const AI::Json& a) -> AI::Json {
+        requireVMesh();
+        if (!a.contains("indices") || !a["indices"].is_array())
+            throw std::runtime_error("indices (array of triangle indices) required");
+        const auto& arr = a["indices"];
+        const int n = (int)sPlacedTriangles.size();
+        std::unordered_set<int> toDelete;
+        for (const auto& v : arr) {
+            int i = v.get<int>();
+            if (i < 0 || i >= n)
+                throw std::runtime_error("triangle index " + std::to_string(i) + " out of range");
+            toDelete.insert(i);
+        }
+        if (toDelete.empty()) return AI::Json{{"deleted", 0}};
+        pushVMeshUndo();
+        std::vector<PlacedTriangle> kept;
+        kept.reserve(n - toDelete.size());
+        for (int i = 0; i < n; i++)
+            if (!toDelete.count(i)) kept.push_back(sPlacedTriangles[i]);
+        sPlacedTriangles = std::move(kept);
+        if (sSelectedTriIndex >= 0 && toDelete.count(sSelectedTriIndex)) sSelectedTriIndex = -1;
+        return AI::Json{{"deleted", (int)toDelete.size()}};
+    });
+
+    AI::registerTool("vmesh_delete_vertices", [requireVMesh](const AI::Json& a) -> AI::Json {
+        requireVMesh();
+        if (!a.contains("indices") || !a["indices"].is_array())
+            throw std::runtime_error("indices (array of vertex indices) required");
+        const auto& arr = a["indices"];
+        const int n = (int)sPlacedDots.size();
+        std::unordered_set<int> toDelete;
+        for (const auto& v : arr) {
+            int i = v.get<int>();
+            if (i < 0 || i >= n)
+                throw std::runtime_error("vertex index " + std::to_string(i) + " out of range");
+            toDelete.insert(i);
+        }
+        if (toDelete.empty()) return AI::Json{{"deleted_vertices", 0}, {"deleted_triangles", 0}};
+        pushVMeshUndo();
+
+        // Build old->new index map.
+        std::vector<int> remap(n, -1);
+        int cur = 0;
+        for (int i = 0; i < n; i++)
+            if (!toDelete.count(i)) remap[i] = cur++;
+
+        // Drop triangles that reference a deleted vertex; remap the rest.
+        int trisDropped = 0;
+        std::vector<PlacedTriangle> keptTris;
+        for (const auto& t : sPlacedTriangles) {
+            if (toDelete.count(t.dotA) || toDelete.count(t.dotB) || toDelete.count(t.dotC)) {
+                trisDropped++;
+                continue;
+            }
+            PlacedTriangle nt = t;
+            nt.dotA = remap[t.dotA];
+            nt.dotB = remap[t.dotB];
+            nt.dotC = remap[t.dotC];
+            keptTris.push_back(nt);
+        }
+        sPlacedTriangles = std::move(keptTris);
+
+        // Same for lines.
+        std::vector<PlacedLine> keptLines;
+        for (const auto& l : sPlacedLines) {
+            if (toDelete.count(l.dotA) || toDelete.count(l.dotB)) continue;
+            keptLines.push_back({remap[l.dotA], remap[l.dotB]});
+        }
+        sPlacedLines = std::move(keptLines);
+
+        // Remove vertices.
+        std::vector<glm::vec3> keptDots;
+        keptDots.reserve(n - toDelete.size());
+        for (int i = 0; i < n; i++)
+            if (!toDelete.count(i)) keptDots.push_back(sPlacedDots[i]);
+        sPlacedDots = std::move(keptDots);
+
+        sSelectedTriIndex = -1;
+        return AI::Json{
+            {"deleted_vertices", (int)toDelete.size()},
+            {"deleted_triangles", trisDropped}
+        };
+    });
+
+    AI::registerTool("vmesh_subdivide_triangles", [requireVMesh](const AI::Json& a) -> AI::Json {
+        requireVMesh();
+        if (!a.contains("indices") || !a["indices"].is_array())
+            throw std::runtime_error("indices (array of triangle indices) required");
+        std::vector<int> indices;
+        const int triCount = (int)sPlacedTriangles.size();
+        for (const auto& v : a["indices"]) {
+            int i = v.get<int>();
+            if (i < 0 || i >= triCount)
+                throw std::runtime_error("triangle index " + std::to_string(i) + " out of range");
+            indices.push_back(i);
+        }
+        if (indices.empty()) return AI::Json{{"subdivided", 0}};
+        // Deduplicate and sort descending so replacement-in-place stays stable.
+        std::sort(indices.begin(), indices.end(), std::greater<int>());
+        indices.erase(std::unique(indices.begin(), indices.end()), indices.end());
+
+        pushVMeshUndo();
+
+        // Reuse an existing vertex if one sits on top of the computed midpoint.
+        auto findOrAddVert = [](const glm::vec3& p) -> int {
+            const float eps = 1e-4f;
+            for (int i = 0; i < (int)sPlacedDots.size(); i++) {
+                if (glm::distance(sPlacedDots[i], p) < eps) return i;
+            }
+            sPlacedDots.push_back(p);
+            return (int)sPlacedDots.size() - 1;
+        };
+
+        int subdivided = 0;
+        for (int idx : indices) {
+            PlacedTriangle t = sPlacedTriangles[idx];
+            glm::vec3 A = sPlacedDots[t.dotA];
+            glm::vec3 B = sPlacedDots[t.dotB];
+            glm::vec3 C = sPlacedDots[t.dotC];
+            int abIdx = findOrAddVert((A + B) * 0.5f);
+            int bcIdx = findOrAddVert((B + C) * 0.5f);
+            int caIdx = findOrAddVert((C + A) * 0.5f);
+            // Replace original with corner-aIdx-abIdx-caIdx, append the rest.
+            sPlacedTriangles[idx] = {t.dotA, abIdx, caIdx, t.flipped};
+            sPlacedTriangles.push_back({abIdx, t.dotB, bcIdx, t.flipped});
+            sPlacedTriangles.push_back({caIdx, bcIdx, t.dotC, t.flipped});
+            sPlacedTriangles.push_back({abIdx, bcIdx, caIdx, t.flipped});
+            subdivided++;
+        }
+        return AI::Json{{"subdivided", subdivided}};
+    });
+
+    AI::registerTool("vmesh_scale_from", [requireVMesh](const AI::Json& a) -> AI::Json {
+        requireVMesh();
+        if (!a.contains("origin") || !a["origin"].is_array() || a["origin"].size() != 3)
+            throw std::runtime_error("origin must be [x,y,z]");
+        glm::vec3 origin(
+            a["origin"][0].get<float>(),
+            a["origin"][1].get<float>(),
+            a["origin"][2].get<float>()
+        );
+        float factor = a.at("factor").get<float>();
+        if (factor == 0.0f) throw std::runtime_error("factor must not be zero");
+
+        std::vector<int> indices;
+        if (a.contains("indices") && a["indices"].is_array() && !a["indices"].empty()) {
+            const int n = (int)sPlacedDots.size();
+            for (const auto& v : a["indices"]) {
+                int i = v.get<int>();
+                if (i < 0 || i >= n)
+                    throw std::runtime_error("vertex index " + std::to_string(i) + " out of range");
+                indices.push_back(i);
+            }
+        } else {
+            indices.resize(sPlacedDots.size());
+            std::iota(indices.begin(), indices.end(), 0);
+        }
+        if (indices.empty()) return AI::Json{{"scaled", 0}};
+        pushVMeshUndo();
+        for (int i : indices) {
+            sPlacedDots[i] = origin + (sPlacedDots[i] - origin) * factor;
+        }
+        return AI::Json{{"scaled", (int)indices.size()}, {"factor", factor}};
+    });
+
+    AI::registerTool("vmesh_perturb_vertices", [requireVMesh](const AI::Json& a) -> AI::Json {
+        requireVMesh();
+        float magnitude = a.value("magnitude", 0.05f);
+        if (magnitude <= 0.0f) throw std::runtime_error("magnitude must be positive");
+        std::vector<int> indices;
+        if (a.contains("indices") && a["indices"].is_array() && !a["indices"].empty()) {
+            const int n = (int)sPlacedDots.size();
+            for (const auto& v : a["indices"]) {
+                int i = v.get<int>();
+                if (i < 0 || i >= n)
+                    throw std::runtime_error("vertex index " + std::to_string(i) + " out of range");
+                indices.push_back(i);
+            }
+        } else {
+            indices.resize(sPlacedDots.size());
+            std::iota(indices.begin(), indices.end(), 0);
+        }
+        if (indices.empty()) return AI::Json{{"perturbed", 0}};
+        pushVMeshUndo();
+
+        static std::mt19937 rng{std::random_device{}()};
+        std::uniform_real_distribution<float> uni(-1.0f, 1.0f);
+        for (int i : indices) {
+            glm::vec3 d;
+            do { d = glm::vec3(uni(rng), uni(rng), uni(rng)); }
+            while (glm::length(d) < 1e-3f);
+            d = glm::normalize(d) * magnitude;
+            sPlacedDots[i] += d;
+        }
+        return AI::Json{{"perturbed", (int)indices.size()}};
+    });
+
+    AI::registerTool("vmesh_flip_triangle", [requireVMesh](const AI::Json& a) -> AI::Json {
+        requireVMesh();
+        int idx = a.at("index").get<int>();
+        if (idx < 0 || idx >= (int)sPlacedTriangles.size())
+            throw std::runtime_error("triangle index out of range");
+        pushVMeshUndo();
+        sPlacedTriangles[idx].flipped = !sPlacedTriangles[idx].flipped;
+        return AI::Json{{"index", idx}, {"flipped", sPlacedTriangles[idx].flipped}};
+    });
+
+    AI::registerTool("vmesh_list_vertices", [requireVMesh](const AI::Json&) -> AI::Json {
+        requireVMesh();
+        AI::Json arr = AI::Json::array();
+        for (int i = 0; i < (int)sPlacedDots.size(); i++) {
+            const auto& v = sPlacedDots[i];
+            arr.push_back({{"index", i}, {"x", v.x}, {"y", v.y}, {"z", v.z}});
+        }
+        return arr;
+    });
+
+    AI::registerTool("vmesh_list_triangles", [requireVMesh](const AI::Json&) -> AI::Json {
+        requireVMesh();
+        AI::Json arr = AI::Json::array();
+        for (int i = 0; i < (int)sPlacedTriangles.size(); i++) {
+            const auto& t = sPlacedTriangles[i];
+            glm::vec3 A = sPlacedDots[t.dotA];
+            glm::vec3 B = sPlacedDots[t.dotB];
+            glm::vec3 C = sPlacedDots[t.dotC];
+            // Match exportVMeshToMesh's blanket flip: the rendered normal is
+            // cross(C-A, B-A) when not flipped, and its negation when flipped.
+            glm::vec3 n = glm::normalize(glm::cross(C - A, B - A));
+            if (t.flipped) n = -n;
+            arr.push_back({
+                {"index", i}, {"a", t.dotA}, {"b", t.dotB}, {"c", t.dotC},
+                {"flipped", t.flipped},
+                {"normal", {n.x, n.y, n.z}}
+            });
+        }
+        return arr;
+    });
+
+    AI::registerTool("vmesh_save", [requireVMesh](const AI::Json&) -> AI::Json {
+        requireVMesh();
+        if (sVMeshName.empty()) throw std::runtime_error("vmesh has no name; open one from the editor first");
+        saveVectorMesh();
+        exportVMeshToMesh();
+        return AI::Json{{"saved", sVMeshName}};
+    });
+
+    AI::registerTool("vmesh_clear", [requireVMesh](const AI::Json&) -> AI::Json {
+        requireVMesh();
+        pushVMeshUndo();
+        sPlacedDots.clear();
+        sPlacedLines.clear();
+        sPlacedTriangles.clear();
+        return AI::Json{{"cleared", true}};
+    });
+
+    AI::registerTool("vmesh_auto_fix_normals", [requireVMesh](const AI::Json&) -> AI::Json {
+        requireVMesh();
+        if (sPlacedTriangles.empty())
+            throw std::runtime_error("no triangles to fix");
+        pushVMeshUndo();
+        bool airtight = aiAutoFixNormals();
+        return AI::Json{{"airtight", airtight}};
+    });
+
+    AI::registerTool("finish_vmesh_edit", [requireVMesh](const AI::Json&) -> AI::Json {
+        requireVMesh();
+        aiFinishVMeshEdit();
+        return AI::Json{{"returned_to", sReturnModelName.empty() ? "menu" : "3dModeler"}};
+    });
+
+    // One-shot shape creation. Clears the slot, places the provided vertices
+    // and triangles, auto-orients normals outward, saves, and returns to
+    // 3dModeler. Preferred path for "create <shape>" prompts because it
+    // removes the model's ability to bail mid-workflow.
+    AI::registerTool("vmesh_build", [requireVMesh](const AI::Json& a) -> AI::Json {
+        requireVMesh();
+        if (!a.contains("vertices") || !a["vertices"].is_array())
+            throw std::runtime_error("vertices (array of [x,y,z]) required");
+        if (!a.contains("triangles") || !a["triangles"].is_array())
+            throw std::runtime_error("triangles (array of {a,b,c,flipped?}) required");
+        const auto& verts = a["vertices"];
+        const auto& tris  = a["triangles"];
+        if (verts.empty()) throw std::runtime_error("vertices is empty");
+        if (tris.empty())  throw std::runtime_error("triangles is empty");
+
+        // Validate before mutating.
+        for (size_t i = 0; i < verts.size(); i++) {
+            if (!verts[i].is_array() || verts[i].size() != 3)
+                throw std::runtime_error("vertex " + std::to_string(i) + " must be [x,y,z]");
+        }
+        const int vn = (int)verts.size();
+        for (size_t i = 0; i < tris.size(); i++) {
+            int ai = tris[i].at("a").get<int>();
+            int bi = tris[i].at("b").get<int>();
+            int ci = tris[i].at("c").get<int>();
+            if (ai < 0 || ai >= vn || bi < 0 || bi >= vn || ci < 0 || ci >= vn)
+                throw std::runtime_error("triangle " + std::to_string(i) + " has out-of-range vertex index");
+            if (ai == bi || bi == ci || ai == ci)
+                throw std::runtime_error("triangle " + std::to_string(i) + " vertices must be distinct");
+        }
+
+        pushVMeshUndo();
+
+        sPlacedDots.clear();
+        sPlacedLines.clear();
+        sPlacedTriangles.clear();
+
+        for (const auto& v : verts) {
+            sPlacedDots.emplace_back(
+                v[0].get<float>(), v[1].get<float>(), v[2].get<float>());
+        }
+        for (const auto& t : tris) {
+            PlacedTriangle pt;
+            pt.dotA = t.at("a").get<int>();
+            pt.dotB = t.at("b").get<int>();
+            pt.dotC = t.at("c").get<int>();
+            pt.flipped = t.value("flipped", false);
+            sPlacedTriangles.push_back(pt);
+        }
+
+        bool airtight = aiAutoFixNormals();
+        // Save on disk but stay in vectorMesh so the user can review/iterate.
+        saveVectorMesh();
+        exportVMeshToMesh();
+        return AI::Json{{"airtight", airtight}};
+    });
 }

@@ -65,6 +65,12 @@ void drawUIElement(const UIElement& element) {
     glUniform2f(sUIShader->loc("uSize"), sizeX, element.size.y);
     glUniform4f(sUIShader->loc("uColor"), element.color.r, element.color.g, element.color.b, element.color.a);
 
+    // Pixel-space dimensions (NDC span is 2.0 across the screen) drive the rounded-corner SDF.
+    float pixW = sizeX * 0.5f * (float)ctx.width;
+    float pixH = element.size.y * 0.5f * (float)ctx.height;
+    glUniform2f(sUIShader->loc("uPixelSize"), pixW, pixH);
+    glUniform1f(sUIShader->loc("uCornerRadius"), element.cornerRadius);
+
     bool hasTexture = element.textureId != 0;
     glUniform1i(sUIShader->loc("uUseTexture"), hasTexture ? 1 : 0);
     if (hasTexture) {

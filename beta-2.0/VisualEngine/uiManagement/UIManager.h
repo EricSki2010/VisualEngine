@@ -23,6 +23,11 @@ bool handleUIClick(double mouseX, double mouseY, int screenWidth, int screenHeig
 // Returns true if the screen point is over any visible UI element.
 bool isPointOverUI(double mouseX, double mouseY, int screenWidth, int screenHeight);
 std::string getInputText(const std::string& groupId, const std::string& elementId);
+bool isAnyInputFocused();
+// Returns the number of wrapped lines the given multiline text input needs
+// to display its current inputText. Uses the element's actual width (in
+// current window dimensions) and labelScale so it matches the renderer.
+int inputWrappedLineCount(const UIElement& e);
 bool hasPendingConfirm();
 std::string getPendingConfirmId();
 void cancelPendingConfirm();
