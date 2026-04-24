@@ -39,6 +39,9 @@ add_executable(modelEditor
     src/mechanics/interaction/Selection.cpp
     src/mechanics/export/GltfExporter.cpp
     src/mechanics/export/TexturePacking.cpp
+    src/mechanics/AiHandling/AiHandling.cpp
+    src/mechanics/AiHandling/AiProcess.cpp
+    src/mechanics/AiHandling/AiTools.cpp
     src/prefabs/templates.cpp
     src/scenes/3dModeler.cpp
     src/scenes/createScene.cpp

@@ -25,6 +25,9 @@ struct UIElement {
     std::string placeholder;
     int maxLength = 32;
     std::function<void(std::string&)> onUnfocus;
+    // Multi-line: text wraps within the input's width, and the element's
+    // size.y is expected to be resized by the caller to fit the line count.
+    bool multiline = false;
 
     // When true, width is adjusted by aspect ratio so equal w/h values render as a square
     bool aspectCorrected = false;
@@ -32,4 +35,7 @@ struct UIElement {
     // Confirmation system
     bool requireConfirm = false;
     std::string confirmId;
+
+    // Rounded corners in pixels. 0 = sharp rectangle. Set by clickable-button prefabs.
+    float cornerRadius = 0.0f;
 };

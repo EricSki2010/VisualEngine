@@ -3,6 +3,8 @@
 #include "TextRenderer.h"
 #include "../EngineGlobals.h"
 #include <algorithm>
+#include <vector>
+#include <string>
 
 static std::vector<UIGroup> sGroups;
 static bool sWasLeftDown = false;
@@ -41,6 +43,61 @@ static UIElement* getFocusedInput() {
             if (e.isTextInput && e.focused) return &e;
     }
     return nullptr;
+}
+
+bool isAnyInputFocused() {
+    return getFocusedInput() != nullptr;
+}
+
+// Forward declarations for helpers defined later in this file.
+static float getCorrectedWidth(const UIElement& e);
+
+// Word-wrap `text` so each line fits within `usableW` pixels at the given
+// labelScale. Falls back to a hard-character break for words longer than
+// usableW. Always returns at least one line (possibly empty).
+static std::vector<std::string> wrapTextToWidth(const std::string& text, float usableW, float scale) {
+    std::vector<std::string> lines;
+    std::string cur, word;
+    auto widthOf = [&](const std::string& s) { return measureText(s, scale); };
+    auto flushWord = [&]() {
+        if (word.empty()) return;
+        std::string candidate = cur.empty() ? word : (cur + " " + word);
+        if (widthOf(candidate) <= usableW) {
+            cur = candidate;
+        } else {
+            if (!cur.empty()) lines.push_back(cur);
+            while (widthOf(word) > usableW && word.size() > 1) {
+                size_t lo = 1, hi = word.size();
+                while (lo < hi) {
+                    size_t mid = (lo + hi + 1) / 2;
+                    if (widthOf(word.substr(0, mid)) <= usableW) lo = mid;
+                    else hi = mid - 1;
+                }
+                lines.push_back(word.substr(0, lo));
+                word = word.substr(lo);
+            }
+            cur = word;
+        }
+        word.clear();
+    };
+    for (char c : text) {
+        if (c == '\n') { flushWord(); if (!cur.empty()) { lines.push_back(cur); cur.clear(); } }
+        else if (c == ' ' || c == '\t') { flushWord(); }
+        else word += c;
+    }
+    flushWord();
+    if (!cur.empty()) lines.push_back(cur);
+    if (lines.empty()) lines.push_back("");
+    return lines;
+}
+
+int inputWrappedLineCount(const UIElement& e) {
+    const float padding = 8.0f;
+    float pixW = getCorrectedWidth(e) / 2.0f * ctx.width;
+    float usableW = pixW - 2.0f * padding;
+    std::string display = e.inputText;
+    auto lines = wrapTextToWidth(display, usableW, e.labelScale);
+    return std::max(1, (int)lines.size());
 }
 
 // Unfocus all text inputs
@@ -182,7 +239,7 @@ void renderUI() {
                     drawText(drawCopy.placeholder, pixX + padding,
                         pixY - pixH / 2.0f - textH / 2.0f,
                         drawCopy.labelScale, {0.5f, 0.5f, 0.5f, 0.7f});
-                } else {
+                } else if (!drawCopy.multiline) {
                     std::string display = drawCopy.inputText;
                     if (drawCopy.focused) {
                         double time = glfwGetTime();
@@ -192,6 +249,27 @@ void renderUI() {
                     drawText(display, pixX + padding,
                         pixY - pixH / 2.0f - textH / 2.0f,
                         drawCopy.labelScale, drawCopy.labelColor);
+                } else {
+                    // Multi-line: use shared wrapTextToWidth so the line
+                    // count matches what inputWrappedLineCount reports to
+                    // the scene (which sizes the element accordingly).
+                    std::string display = drawCopy.inputText;
+                    if (drawCopy.focused) {
+                        double time = glfwGetTime();
+                        if (((int)(time * 2.0)) % 2 == 0) display += "|";
+                    }
+                    const float usableW = pixW - 2.0f * padding;
+                    auto lines = wrapTextToWidth(display, usableW, drawCopy.labelScale);
+                    const float lineStep = textH + 4.0f;
+                    // Stack lines top-down. pixY is the element's bottom edge
+                    // in pixel space (y grows downward); the top edge is at
+                    // pixY - pixH. drawText takes y as the line's top.
+                    float topInPixels = pixY - pixH + padding;
+                    for (size_t i = 0; i < lines.size(); i++) {
+                        float y = topInPixels + (float)i * lineStep;
+                        drawText(lines[i], pixX + padding, y,
+                            drawCopy.labelScale, drawCopy.labelColor);
+                    }
                 }
             }
         }
@@ -421,6 +499,7 @@ void createDropdown(const std::string& groupId, const std::string& id,
     btn.color = color;
     btn.label = label;
     btn.hoverable = true;
+    btn.cornerRadius = 8.0f;
     btn.onClick = [dropGroupId, id, x, y, w, h, color, offsetX, offsetY,
                    optionsCopy, onSelectCopy, groupId]() {
         // Toggle: if group exists, remove it; otherwise create it
@@ -436,7 +515,11 @@ void createDropdown(const std::string& groupId, const std::string& id,
         addUIGroup(dropGroupId);
         float optY = y + offsetY;
         float optX = x + offsetX;
-        glm::vec4 optColor = color + glm::vec4(0.05f, 0.05f, 0.05f, 0.0f);
+        glm::vec4 optColor = glm::vec4(
+            std::min(color.r * 1.2f, 1.0f),
+            std::min(color.g * 1.2f, 1.0f),
+            std::min(color.b * 1.2f, 1.0f),
+            color.a);
 
         for (int i = 0; i < (int)optionsCopy.size(); i++) {
             std::string optId = dropGroupId + "_" + std::to_string(i);
@@ -454,6 +537,7 @@ void createDropdown(const std::string& groupId, const std::string& id,
             opt.color = optColor;
             opt.label = optLabel;
             opt.hoverable = true;
+            opt.cornerRadius = 8.0f;
             opt.onClick = [cb, idx, optLabel, dgid, mainBtnGroup, mainBtnId]() {
                 // Update the main button label before removing anything
                 UIElement* mainBtn = getUIElement(mainBtnGroup, mainBtnId);

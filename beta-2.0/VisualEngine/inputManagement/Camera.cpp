@@ -1,4 +1,5 @@
 #include "Camera.h"
+#include "../uiManagement/UIManager.h"
 #include <cmath>
 
 static Camera gCamera;
@@ -29,9 +30,11 @@ void Camera::updateDir() {
 void Camera::processKeyboard(GLFWwindow* window, float dt) {
     if (mode == CAMERA_FLAT) return;
 
-    // Q toggle — checked every frame, instant response
+    // Q toggle — checked every frame, instant response.
+    // Suppressed while a text input is focused so typing "q" doesn't also
+    // grab the mouse into look mode.
     bool qDown = glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS;
-    if (qDown && !qWasPressed) {
+    if (qDown && !qWasPressed && !isAnyInputFocused()) {
         looking = !looking;
         if (looking) {
             glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
