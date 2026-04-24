@@ -319,7 +319,7 @@ bound, textured/solid meshes with `ctx.shader`.
   Recalculates the look direction from yaw/pitch.
 
 `camera.processKeyboard(window, dt)`
-  Handles WASD movement and Q to toggle mouse look. Disabled in FLAT mode. Movement only when Q is active.
+  Handles WASD movement and Q to toggle mouse look. Disabled in FLAT mode. Movement only when Q is active. The Q toggle is suppressed while any UI text input is focused (via `isAnyInputFocused()`) so typing a literal "q" in a prompt doesn't grab the mouse.
 
 `camera.getViewMatrix() -> mat4`
   Returns the current view matrix. Identity in FLAT mode.
@@ -493,6 +493,12 @@ rz -> 3
 `getInputText(groupId, elementId) -> string`
   Returns the current text in a text input element.
 
+`isAnyInputFocused() -> bool`
+  True if any visible text input in any group currently has focus. Scenes use this to gate hotkeys (Q for camera look, Space for save+transition) so typing those characters in a prompt doesn't trigger the action.
+
+`inputWrappedLineCount(element) -> int`
+  For a `multiline` text input, returns how many lines the renderer will draw given the element's current `inputText`, width (from `size.x`, window-size aware), and `labelScale`. Scenes use this to size a growable input box in sync with the renderer's word-wrap.
+
 `hasPendingConfirm() -> bool`
   Returns true if a button is waiting for confirmation.
 
@@ -515,7 +521,7 @@ rz -> 3
   Creates a textured rectangle. Not hoverable by default; set `hoverable = true` on the returned element to opt in. Assigning an `onClick` promotes it to interactive for `isPointOverUI` purposes.
 
 `createTextInput(id, x, y, w, h, color, placeholder, maxLength) -> UIElement`
-  Creates a clickable text input field with placeholder text. Text inputs are always excluded from hover (they keep their own focused-lighter state).
+  Creates a clickable text input field with placeholder text. Text inputs are always excluded from hover (they keep their own focused-lighter state). Set `element.multiline = true` after creation to enable word-wrapped rendering: text wraps by pixel width, lines stack top-down within the element, cursor appears at the end of the last line. Scenes that want the box to grow with content poll `inputWrappedLineCount(element)` each frame and set `size.y` accordingly.
 
 `createSubButton(id, parentX, parentY, parentW, parentH, anchorX, anchorY, widthRatio, heightRatio, padding, color, label, onClick) -> UIElement`
   Creates a button positioned relative to a parent element. anchorX/anchorY (0-1) control alignment. widthRatio/heightRatio are fractions of parent size. padding is fraction of parent height. `hoverable = true`.

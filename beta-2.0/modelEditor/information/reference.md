@@ -230,3 +230,123 @@ Passed from 3dModeler to vectorMesh scene on "Edit Object".
 | Q | Toggle FPS camera | Toggle FPS camera |
 | WASD | Move (when Q active) | Move (when Q active) |
 | Space/Shift | Up/Down (when Q active) | Up/Down (when Q active) |
+
+Q and Space (save+transition) are both suppressed while any text input is
+focused, so typing those characters in a prompt never triggers the camera
+or save action.
+
+---
+
+## AI Agent (`src/mechanics/AiHandling/`)
+
+Optional Gemini-powered assistant. Off by default; toggle from the main
+menu. When off, none of the AI code runs and no UI is shown.
+
+### C++ layer
+
+| File | Role |
+|---|---|
+| `AiHandling.h/.cpp` | Public facade. `init`, `shutdown`, `update(dt)`, `submitPrompt`, `submitPromptWithContext`, `isEnabled` / `setEnabled`, status accessors. Polls `getActiveSceneName()` each frame and emits `scene_change` events to the sidecar when the scene changes (outside OR inside a tool call). |
+| `AiProcess.h/.cpp` | Windows subprocess wrapper. `CreateProcessA` with redirected stdin/stdout. A reader thread blocks on stdout, pushes each line onto a mutex-protected inbox; main thread drains via `drainInbox(cb)` once per frame. |
+| `AiTools.h/.cpp` | Tool registry. `registerTool(name, lambda)` — scenes register during their `register*Scene()` so lambdas capture file-scope statics. `dispatchTool(name, args)` looks up, invokes, catches exceptions into `{ok:false, error:"..."}`. |
+
+### Python sidecar (`agent.py`)
+
+Runs the Gemini tool-calling loop with `google-genai`. Maintains history
+manually (no `chats.create()`) so per-request `tools=[...]` can follow the
+active scene. Features:
+
+- **Scene-filtered tools** — `SCENE_TOOLS` map per scene; Send + Info adds `CONTEXT_TOOLS` for the current scene.
+- **Short-name aliases** — `SHORT_NAMES` (e.g. `vmesh_add_vertices` → `av`) rewrites tool names on the wire. Translation back to long names happens in `run_prompt` before calling C++.
+- **Retries** — 1/3/7 s backoff on transient errors (503, 429, UNAVAILABLE, RESOURCE_EXHAUSTED); up to 2 silent retries on MALFORMED_FUNCTION_CALL / OTHER / FINISH_REASON_UNSPECIFIED.
+- **Cost accounting** — accumulates `prompt_token_count`, `candidates_token_count`, `cached_content_token_count` across every generate_content call in the prompt. `[$0.00057 | 1840->124 tok]` appended to each `final` message. Pricing in `MODEL_PRICING`.
+- **Output cap** — `max_output_tokens = 32768` so flash doesn't bail out of large `bd` calls.
+
+### Protocol (JSONL over stdio)
+
+```
+host -> sidecar:
+  {"type":"prompt", "text":"...", "with_context":bool}
+  {"type":"tool_result", "call_id":"...", "name":"...", "ok":bool, "result":<any> | "error":"..."}
+  {"type":"scene_change", "scene":"3dModeler" | "vectorMesh" | "menu"}
+  {"type":"shutdown"}
+
+sidecar -> host:
+  {"type":"ready"}
+  {"type":"tool_call", "call_id":"...", "name":"<short alias>", "args":{...}}
+  {"type":"final", "text":"..."}
+  {"type":"log", "text":"..."}
+  {"type":"error", "text":"..."}
+```
+
+Scene changes are emitted both by the per-frame poll in `AI::update` and
+by `handleLine` immediately after any tool dispatch that changes the scene
+(so the change lands in the host → sidecar stream before the `tool_result`
+that would trigger the next request).
+
+### Persistent files (next to the exe)
+
+| File | Contents |
+|---|---|
+| `ai_enabled.txt` | `1` (on) or `0` (off). Missing ⇒ OFF. Managed by `AI::setEnabled`. |
+| `.gemini_key` | User's Gemini API key. Read by `run.bat` into `GEMINI_API_KEY` on launch, OR set at runtime via the Set API Key menu (which also calls `_putenv_s` + sidecar restart so the change is live). |
+
+### Menu integration (`src/scenes/menu.cpp`)
+
+Two new buttons above Exit:
+- **AI: ON / AI: OFF** — `AI::setEnabled(!AI::isEnabled())` + `showMainMenu()` to refresh the label. Live-applies: turns the sidecar off/on immediately.
+- **Set API Key** — opens a sub-view with a text input + Save + Back. Save trims trailing whitespace, writes `.gemini_key`, sets env var via `_putenv_s`, cycles the sidecar (`AI::shutdown()` + `AI::init()`), returns to main menu.
+
+### Scene integration
+
+Both 3dModeler and vectorMesh, when `AI::isEnabled()`, construct a left-side
+`ai_panel` UI group with:
+- Dark background panel (full-height on the left, mirror of the right sidebar)
+- `ai_response` framed box containing 8 transparent `ai_line_i` label rows
+- Multi-line prompt input (`multiline = true`; grows downward from anchor y=0.48)
+- **Send** button (always) and **Send + Info** button (3dModeler only)
+
+Per frame in `onInput`:
+1. `AI::update(dt)` — drain sidecar, dispatch tool calls.
+2. Recompute prompt height from `inputWrappedLineCount(*input)`, anchor top at 0.48, slide Send (and Send + Info in 3dModeler) below.
+3. Word-wrap the current response (or status) into the 8 rows; truncate with "..." on overflow.
+
+### Tool catalogue
+
+**Always available in 3dModeler:**
+- `gs` — get_current_scene
+- `sp` — set_palette_color(slot 0..15, r/g/b 0..1)
+- `gp` — get_palette
+- `ps` — select_color_slot
+- `es` — edit_slot (transitions into vectorMesh)
+
+**Send + Info adds (3dModeler only):**
+- `cp` — get_camera_position (x, y, z, yaw, pitch)
+- `cf` — get_camera_forward (unit vector)
+- `ab` — get_aimed_block (ray-AABB pick, returns `{hit, x, y, z, face, distance}`)
+- `lb` — list_blocks
+
+**Always available in vectorMesh:**
+- `bd` — vmesh_build (one-shot: clear + add verts + add tris + auto-fix normals + save)
+- `av`, `at` — batch add vertices / triangles
+- `dt`, `dv` — batch delete triangles / vertices (vertex delete cascades to triangles)
+- `sd` — subdivide_triangles (4 children per triangle, shared midpoints, watertight)
+- `pv` — perturb_vertices (random offset × magnitude)
+- `sf` — scale_from (origin + factor, optional indices)
+- `ft` — flip_triangle
+- `lv`, `lt` — list vertices / triangles (rendered-normal convention)
+- `sv` — save mesh
+- `cl` — clear
+- `af` — auto_fix_normals (union-find components, centroid heuristic, airtight check)
+- `fn` — finish (save + transition back to 3dModeler)
+
+All tools register with a `require3dModeler` / `requireVMesh` scene guard
+that throws if called from the wrong scene.
+
+### Normal direction contract
+
+`vmesh_list_triangles` (`lt`) reports normals using `cross(C-A, B-A)` with
+`flipped` inverting, which matches the export's blanket flip in
+`exportVMeshToMesh`. The AI's idea of "outward" agrees with what gets
+drawn — flipping a triangle the AI reports as inward actually makes it
+outward in the render.

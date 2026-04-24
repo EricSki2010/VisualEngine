@@ -79,6 +79,34 @@ The application (modelEditor) is a tool for building, painting, and editing
 - Ready to load into any glTF-compatible engine for your own lighting
 - Texture packing utility: rasterize 2D triangle groups (with per-triangle colors) into square PNG buffers with conservative coverage — no missing pixels at edges
 
+### AI Agent (optional, opt-in)
+- Built-in Gemini-powered assistant that drives the editor through tool calls
+- Main-menu **AI: ON / AI: OFF** toggle (default OFF). Off means zero
+  Python spawning, no sidecar, no AI UI — identical to a no-AI build.
+- **Set API Key** screen inside the menu — paste a Gemini key, click Save;
+  written to local `.gemini_key`, env var updated in-process, sidecar
+  hot-restarted, no shell needed. Friend-shippable.
+- Left-side prompt panel in 3dModeler and vectorMesh: multi-line input
+  that grows downward as text wraps, 8-row response display, **Send** and
+  (3dModeler only) **Send + Info** buttons. Per-prompt USD cost printed
+  alongside every response.
+- **3dModeler tools**: palette set/get/select, transition into vectorMesh.
+  *Send + Info* adds: camera position/forward, ray-AABB block pick,
+  list-blocks.
+- **vectorMesh tools**: one-shot `vmesh_build` (clear + add verts + add
+  tris + auto-fix normals + save in a single call), batch add / delete
+  vertices and triangles, subdivide-triangles, perturb-vertices,
+  scale-from-origin, auto-fix-normals, list / save / clear / finish.
+- **Token economy**: scene-filtered tool sets, 2-letter wire aliases, slim
+  schemas, batch + macro tools, retry on transient errors, accurate cost
+  accounting. A full pyramid build runs ~$0.0005 on `gemini-2.5-flash`.
+- **Architecture**: small Python sidecar (`src/mechanics/AiHandling/agent.py`)
+  using `google-genai` runs the Gemini chat loop; the C++ side
+  (`src/mechanics/AiHandling/`) spawns it as a subprocess and routes
+  function calls onto the main thread.
+- **Auto-install**: on first launch with AI enabled, `setupAiDependencies()`
+  runs `pip install google-genai` if the import isn't found.
+
 ### General
 - Pause menu with save & exit
 - Camera locked during pause
@@ -94,6 +122,8 @@ The application (modelEditor) is a tool for building, painting, and editing
 | `.mesh` | Renderable mesh (vertices + indices + optional normals + optional texture) |
 | `.vmesh` | Vector mesh editor data (dots + lines + triangles, editable) |
 | `.glb` | Exported glTF Binary for use in other engines |
+| `.gemini_key` | User-local Gemini API key (gitignored, optional, only when AI is on) |
+| `ai_enabled.txt` | User-local AI on/off preference (gitignored, default OFF) |
 
 ## Tech Stack
 
@@ -107,6 +137,7 @@ The application (modelEditor) is a tool for building, painting, and editing
 - nlohmann/json (single-header, bundled in `beta-2.0/thirdparty/`)
 - CMake build system
 - MSVC compiler (Windows)
+- Python 3 + `google-genai` (only if the optional AI agent is enabled)
 
 ## Project Structure
 
@@ -125,11 +156,16 @@ beta-2.0/
 │   ├── sceneManagement/        — Scene lifecycle
 │   └── memoryManagement/       — Save/load, model files
 ├── modelEditor/                — Editor application
-│   └── src/
-│       ├── scenes/             — 3dModeler, vectorMesh, menu, createScene
-│       ├── mechanics/
-│       │   ├── interaction/    — Highlight, Selection
-│       │   └── export/         — GltfExporter, TexturePacking
-│       └── prefabs/            — Built-in meshes (cube, wedge)
+│   ├── src/
+│   │   ├── scenes/             — 3dModeler, vectorMesh, menu, createScene
+│   │   ├── mechanics/
+│   │   │   ├── interaction/    — Highlight, Selection
+│   │   │   ├── export/         — GltfExporter, TexturePacking
+│   │   │   └── AiHandling/     — Gemini agent: AiHandling, AiProcess,
+│   │   │                         AiTools (C++) + agent.py (Python sidecar)
+│   │   └── prefabs/            — Built-in meshes (cube, wedge)
+│   ├── setUpAPI.bat            — one-shot API key setup from a shell
+│   └── dist_run.bat            — shipped as build/Release/run.bat for
+│                                 double-click launch
 └── thirdparty/                 — Bundled headers (json.hpp, stb_image_write.h)
 ```
